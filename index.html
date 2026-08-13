@@ -280,7 +280,7 @@
     </div>
 
     <div class="actions">
-      <button id="generateBtn">動画を生成する</button>
+      <button id="generateBtn">動画を生成する（MP4）</button>
     </div>
     <div class="status" id="statusText"></div>
 
@@ -295,9 +295,11 @@
 </main>
 
 <footer>
-  Text Frame — canvas + MediaRecorder で完結するクライアントサイド動画メーカー。サーバー送信なし。
+  Text Frame — canvas + MediaRecorder + ffmpeg.wasm で完結するクライアントサイド動画メーカー（MP4出力）。サーバー送信なし。
 </footer>
 
+<script src="https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.js"></script>
+<script src="https://unpkg.com/@ffmpeg/util@0.12.1/dist/umd/index.js"></script>
 <script>
 (function(){
   const textInput = document.getElementById('textInput');
@@ -429,6 +431,62 @@
     return '';
   }
 
+  let ffmpeg = null;
+  let ffmpegLoading = null;
+
+  async function getFFmpeg(){
+    if(ffmpeg) return ffmpeg;
+    if(ffmpegLoading) return ffmpegLoading;
+
+    ffmpegLoading = (async () => {
+      const { FFmpeg } = FFmpegWASM;
+      const { toBlobURL } = FFmpegUtil;
+      const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
+      const instance = new FFmpeg();
+      instance.on('log', ({message}) => {
+        // console.log(message);
+      });
+      await instance.load({
+        coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
+        wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
+      });
+      ffmpeg = instance;
+      return instance;
+    })();
+
+    return ffmpegLoading;
+  }
+
+  async function recordWebm(){
+    const stream = canvas.captureStream(1); // 1fps
+    const mimeType = pickMimeType();
+    const recorder = new MediaRecorder(stream, mimeType ? {mimeType} : undefined);
+    const chunks = [];
+
+    recorder.ondataavailable = (e) => {
+      if(e.data && e.data.size > 0) chunks.push(e.data);
+    };
+
+    const stopped = new Promise((resolve) => {
+      recorder.onstop = resolve;
+    });
+
+    recorder.start();
+
+    const track = stream.getVideoTracks()[0];
+    const interval = setInterval(() => {
+      draw();
+      if(track.requestFrame) track.requestFrame();
+    }, 200);
+
+    await new Promise(r => setTimeout(r, 1000));
+    clearInterval(interval);
+    recorder.stop();
+    await stopped;
+
+    return new Blob(chunks, {type: mimeType || 'video/webm'});
+  }
+
   async function generateVideo(){
     statusText.classList.remove('err');
     if(!window.MediaRecorder){
@@ -438,49 +496,39 @@
     }
 
     generateBtn.disabled = true;
-    statusText.textContent = '生成中…';
     postActions.style.display = 'none';
     resultVideo.style.display = 'none';
 
     draw(); // ensure canvas reflects latest state
 
     try {
-      const stream = canvas.captureStream(1); // 1fps
-      const mimeType = pickMimeType();
-      const recorder = new MediaRecorder(stream, mimeType ? {mimeType} : undefined);
-      const chunks = [];
+      statusText.textContent = '録画中…';
+      const webmBlob = await recordWebm();
 
-      recorder.ondataavailable = (e) => {
-        if(e.data && e.data.size > 0) chunks.push(e.data);
-      };
+      statusText.textContent = 'MP4に変換中…（初回は変換エンジンの読み込みに時間がかかります）';
+      const ff = await getFFmpeg();
+      const { fetchFile } = FFmpegUtil;
 
-      const stopped = new Promise((resolve) => {
-        recorder.onstop = resolve;
-      });
+      await ff.writeFile('input.webm', await fetchFile(webmBlob));
+      await ff.exec([
+        '-i', 'input.webm',
+        '-r', '1',
+        '-pix_fmt', 'yuv420p',
+        '-c:v', 'libx264',
+        '-movflags', '+faststart',
+        'output.mp4'
+      ]);
+      const data = await ff.readFile('output.mp4');
+      const mp4Blob = new Blob([data.buffer], {type: 'video/mp4'});
 
-      recorder.start();
-
-      // Keep re-drawing the same frame each "tick" so the stream stays alive for 1s
-      const track = stream.getVideoTracks()[0];
-      const interval = setInterval(() => {
-        draw();
-        if(track.requestFrame) track.requestFrame();
-      }, 200);
-
-      await new Promise(r => setTimeout(r, 1000));
-      clearInterval(interval);
-      recorder.stop();
-      await stopped;
-
-      const blob = new Blob(chunks, {type: mimeType || 'video/webm'});
       if(lastUrl) URL.revokeObjectURL(lastUrl);
-      lastBlob = blob;
-      lastUrl = URL.createObjectURL(blob);
+      lastBlob = mp4Blob;
+      lastUrl = URL.createObjectURL(mp4Blob);
 
       resultVideo.src = lastUrl;
       resultVideo.style.display = 'block';
       postActions.style.display = 'flex';
-      statusText.textContent = `完了（${(blob.size/1024).toFixed(1)} KB, ${mimeType || 'webm'}）`;
+      statusText.textContent = `完了（${(mp4Blob.size/1024).toFixed(1)} KB, video/mp4）`;
     } catch(err){
       console.error(err);
       statusText.textContent = '生成に失敗しました: ' + err.message;
@@ -496,7 +544,7 @@
     if(!lastBlob) return;
     const a = document.createElement('a');
     a.href = lastUrl;
-    a.download = 'text-frame.webm';
+    a.download = 'text-frame.mp4';
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -505,7 +553,7 @@
   shareBtn.addEventListener('click', async () => {
     if(!lastBlob) return;
     try {
-      const file = new File([lastBlob], 'text-frame.webm', {type: lastBlob.type});
+      const file = new File([lastBlob], 'text-frame.mp4', {type: lastBlob.type});
       if(navigator.canShare && navigator.canShare({files:[file]})){
         await navigator.share({
           files:[file],
