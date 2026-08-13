@@ -2,7 +2,7 @@
 // キャッシュにより、初回アクセス後はオフラインでもページ表示・動画生成（MP4変換含む）が可能になります。
 // 依存ライブラリ（mp4-muxer）もすべてローカル同梱（vendor/）のためCDN接続は不要です。
 
-const CACHE_VERSION = 'text-frame-v1';
+const CACHE_VERSION = 'text-frame-v2';
 const PRECACHE_URLS = [
   './',
   './index.html',
