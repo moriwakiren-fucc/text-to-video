@@ -450,7 +450,7 @@
 </main>
 
 <footer>
-  Text Frame — canvas + WebCodecs(VideoEncoder) + mp4-muxer（同梱・オフライン動作）で完結するクライアントサイド動画メーカー。サーバー送信なし。
+  Text Frame — canvas + WebCodecs / MediaRecorder（iPad Safari対応）+ mp4-muxer（同梱・オフライン動作）で完結するクライアントサイド動画メーカー。サーバー送信なし。
 </footer>
 
 <script src="vendor/mp4-muxer.js"></script>
@@ -654,12 +654,44 @@
   updateCanvasSize();
   draw();
 
+  // Show which encoding path this device will use
+  (function showEngineBadge(){
+    if(isWebCodecsSupported()){
+      dimsNote.dataset.engine = 'webcodecs';
+    } else if(isMediaRecorderMp4Supported()){
+      dimsNote.dataset.engine = 'mediarecorder';
+    } else {
+      dimsNote.dataset.engine = 'unsupported';
+      statusText.textContent = 'この端末・ブラウザは MP4 生成に対応していない可能性があります。生成ボタンを押してご確認ください。';
+    }
+  })();
+
   // ---------- Encoding ----------
   function isWebCodecsSupported(){
     return !!(window.VideoEncoder && window.VideoFrame && window.Mp4Muxer);
   }
 
-  async function encodeFrames(frameCount, drawFrame, onProgress){
+  function getSupportedMp4MimeType(){
+    if(!window.MediaRecorder) return null;
+    const candidates = [
+      'video/mp4;codecs=avc1',
+      'video/mp4;codecs=h264',
+      'video/mp4'
+    ];
+    for(const c of candidates){
+      try {
+        if(MediaRecorder.isTypeSupported(c)) return c;
+      } catch(e){ /* ignore */ }
+    }
+    return null;
+  }
+
+  function isMediaRecorderMp4Supported(){
+    return !!getSupportedMp4MimeType();
+  }
+
+  // ---- Path A: WebCodecs + mp4-muxer (Chrome / Edge etc.) ----
+  async function encodeFramesWebCodecs(frameCount, drawFrame, onProgress){
     const fps = 1;
     const muxer = new Mp4Muxer.Muxer({
       target: new Mp4Muxer.ArrayBufferTarget(),
@@ -697,7 +729,6 @@
       frame.close();
       bitmap.close();
       if(onProgress) onProgress(i+1, frameCount);
-      // Yield to the UI thread so progress updates & the page stays responsive
       await new Promise(r => setTimeout(r, 0));
     }
 
@@ -709,11 +740,63 @@
     return new Blob([buffer], { type: 'video/mp4' });
   }
 
+  // ---- Path B: MediaRecorder direct MP4 capture (Safari / iPad etc.) ----
+  // Uses a fixed 1fps captureStream and continuously redraws the canvas so
+  // the recorder has fresh pixels each tick; this is the most broadly
+  // compatible approach across Safari/iPadOS versions.
+  async function encodeFramesMediaRecorder(frameCount, drawFrame, onProgress, mimeType){
+    return new Promise((resolve, reject) => {
+      try {
+        const stream = canvas.captureStream(1); // 1fps
+        const recorder = new MediaRecorder(stream, { mimeType });
+        const chunks = [];
+
+        recorder.ondataavailable = (e) => {
+          if(e.data && e.data.size > 0) chunks.push(e.data);
+        };
+        recorder.onerror = (e) => reject(e.error || new Error('MediaRecorder error'));
+        recorder.onstop = () => resolve(new Blob(chunks, { type: mimeType }));
+
+        recorder.start();
+
+        let i = 0;
+        drawFrame(i);
+        if(onProgress) onProgress(1, frameCount);
+
+        const timer = setInterval(() => {
+          i++;
+          if(i >= frameCount){
+            clearInterval(timer);
+            drawFrame(frameCount - 1); // hold the final frame
+            // Let the recorder capture a bit past the last tick before stopping
+            setTimeout(() => recorder.stop(), 1100);
+            return;
+          }
+          drawFrame(i);
+          if(onProgress) onProgress(i+1, frameCount);
+        }, 1000);
+      } catch(err){
+        reject(err);
+      }
+    });
+  }
+
+  async function encodeFrames(frameCount, drawFrame, onProgress){
+    if(isWebCodecsSupported()){
+      return encodeFramesWebCodecs(frameCount, drawFrame, onProgress);
+    }
+    const mp4Mime = getSupportedMp4MimeType();
+    if(mp4Mime){
+      return encodeFramesMediaRecorder(frameCount, drawFrame, onProgress, mp4Mime);
+    }
+    throw new Error('unsupported');
+  }
+
   async function generateVideo(){
     statusText.classList.remove('err');
 
-    if(!isWebCodecsSupported()){
-      statusText.textContent = 'このブラウザは WebCodecs に対応していないため MP4 を生成できません（Chrome / Edge 等の最新版をご利用ください）。';
+    if(!isWebCodecsSupported() && !isMediaRecorderMp4Supported()){
+      statusText.textContent = 'このブラウザ・端末は MP4 動画の生成に対応していません。iPadの場合はSafari最新版でお試しください。';
       statusText.classList.add('err');
       return;
     }
@@ -724,25 +807,30 @@
     progressBar.classList.remove('visible');
     progressFill.style.width = '0%';
 
+    const usingWebCodecs = isWebCodecsSupported();
+
     try {
       let mp4Blob;
 
       if(clockMode === 'off'){
         statusText.textContent = '生成中…';
         draw();
-        mp4Blob = await encodeFrames(1, () => draw());
+        // For a single still frame, push it twice (t=0s, t=1s) so the
+        // resulting file has a genuine 1-second duration in every encoder path.
+        mp4Blob = await encodeFrames(2, () => draw());
       } else {
         const duration = getDurationSeconds();
         const frameCount = duration + 1; // +1 second as agreed (e.g. 3min => 181 frames)
         progressBar.classList.add('visible');
-        statusText.textContent = `生成中… (0 / ${frameCount} フレーム)`;
+        const timeHint = usingWebCodecs ? '' : '（実時間の録画のため指定時間とほぼ同じだけかかります）';
+        statusText.textContent = `生成中…${timeHint} (0 / ${frameCount} フレーム)`;
 
         mp4Blob = await encodeFrames(frameCount, (i) => {
           draw(i);
         }, (done, total) => {
           const pct = Math.round(done/total*100);
           progressFill.style.width = pct + '%';
-          statusText.textContent = `生成中… (${done} / ${total} フレーム)`;
+          statusText.textContent = `生成中…${timeHint} (${done} / ${total} フレーム)`;
         });
       }
 

@@ -46,10 +46,10 @@ https://<ユーザー名>.github.io/text-to-video/
 
 - 素のHTML / CSS / JavaScriptのみで実装（フレームワーク・ビルド不要）
 - `<canvas>` にテキスト・時計を描画してプレビューを作成
-- [WebCodecs API](https://developer.mozilla.org/ja/docs/Web/API/WebCodecs_API)（`VideoEncoder` / `VideoFrame`）でcanvasの各フレームを直接H.264にエンコード
-- [`mp4-muxer`](https://github.com/Vanilagy/mp4-muxer)（**リポジトリに同梱・`vendor/mp4-muxer.js`**、軽量なJS製MP4マルチプレクサ）でエンコード済みのフレームをMP4コンテナに格納
-  - CDNに依存せずローカルファイルとして同梱しているため、オフラインでも動画生成が可能
-- 巨大なWASMエンジン（ffmpeg.wasm等）を使わないため、初回読み込み・生成ともに高速
+- MP4への変換は端末の対応状況に応じて2つの方式を自動選択：
+  - **WebCodecs API**（`VideoEncoder` / `VideoFrame`）+ [`mp4-muxer`](https://github.com/Vanilagy/mp4-muxer)（**リポジトリに同梱・`vendor/mp4-muxer.js`**）: Chrome / Edge など Chromium系ブラウザ向け。高速でファイルサイズも小さい
+  - **MediaRecorder API による直接MP4録画**: iPad / iPhone の Safari など、WebCodecsに対応していない端末向け。`canvas.captureStream(1)` で1fpsの映像を実時間で録画する
+- CDNに依存せずローカルファイルとして同梱しているため、オフラインでも動画生成が可能
 - Service Worker（`sw.js`）がページ・スクリプト・依存ライブラリをキャッシュし、2回目以降のアクセスをオフライン対応にする
 - 外部への送信は行わず、すべてブラウザ内（クライアントサイド）で完結
 
@@ -62,11 +62,12 @@ https://<ユーザー名>.github.io/text-to-video/
 
 ## 動作環境について
 
-- 動画生成には **WebCodecs API**（`VideoEncoder` / `VideoFrame`）が必要です。2024年以降の Chrome / Edge など Chromium系ブラウザで動作します。Safari や Firefox は対応状況が限定的なため、非対応の場合はその旨を画面に表示します。
-- WebCodecsに対応していない環境では動画生成ができません。その場合はChromeやEdgeなど対応ブラウザでの利用をご案内ください。
+- **Chrome / Edge など Chromium系ブラウザ**：WebCodecs APIを使って高速にMP4を生成します。時計オプションを使っても実時間は待たずに生成できます。
+- **iPad / iPhone の Safari**：WebCodecsのエンコードに対応していないため、`MediaRecorder` による直接MP4録画方式（H.264）に自動的に切り替わります。この方式では**動画の長さぶんだけ実際に待ち時間が発生します**（例: タイマーを3分に設定すると生成にも約3分かかります）。時計オプションなしの静止動画（1秒）は待ち時間はごくわずかです。
+- どちらの方式にも対応していない場合は、その旨をエラーメッセージで表示します。
 - オフライン機能には Service Worker のサポートが必要です。ほとんどのモダンブラウザで対応しています。
 - 共有ボタンは `navigator.share` / `navigator.canShare` に対応した環境（主にスマートフォンのブラウザ）でのみ共有シートが表示されます。非対応環境では代わりにダウンロードをご利用ください。
-- タイマー／ストップウォッチを長時間（数十分など）に指定すると、フレーム数が多くなり生成に時間がかかります。生成中は進捗バーで状況を確認できます。
+- タイマー／ストップウォッチを長時間（数十分など）に指定すると、Chromeでもフレーム数が多くなり生成に時間がかかります。Safari系ではさらに実時間が加算される点にご注意ください。生成中は進捗バーで状況を確認できます。
 
 ## リポジトリ構成
 
