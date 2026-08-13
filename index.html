@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Text Frame — 静止動画メーカー</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#141311">
 <style>
   :root{
     --paper:#ECE7DD;
@@ -37,6 +39,8 @@
     display:flex;
     justify-content:space-between;
     align-items:baseline;
+    flex-wrap:wrap;
+    gap:8px;
   }
   .masthead h1{
     font-size:26px;
@@ -50,6 +54,22 @@
     letter-spacing:0.12em;
     text-transform:uppercase;
     color:var(--ink-soft);
+  }
+
+  .offline-badge{
+    font-family:var(--mono);
+    font-size:10px;
+    letter-spacing:0.08em;
+    text-transform:uppercase;
+    padding:3px 8px;
+    border:1px solid var(--line);
+    color:var(--ink-soft);
+    display:none;
+  }
+  .offline-badge.ready{
+    display:inline-block;
+    border-color:#3f7a4d;
+    color:#3f7a4d;
   }
 
   main{
@@ -147,6 +167,91 @@
     accent-color:var(--accent);
   }
 
+  /* Align toggle */
+  .toggle-group{
+    display:flex;
+    border:1px solid var(--line);
+    width:fit-content;
+  }
+  .toggle-group button{
+    font-family:var(--mono);
+    font-size:11px;
+    letter-spacing:0.06em;
+    text-transform:uppercase;
+    padding:9px 16px;
+    border:none;
+    background:var(--paper);
+    color:var(--ink-soft);
+    cursor:pointer;
+    border-right:1px solid var(--line);
+  }
+  .toggle-group button:last-child{border-right:none;}
+  .toggle-group button.active{
+    background:var(--ink);
+    color:var(--paper);
+  }
+
+  /* Clock option panel */
+  .clock-options{
+    margin-top:20px;
+    padding-top:20px;
+    border-top:1px solid var(--line);
+  }
+  .radio-group{
+    display:flex;
+    gap:16px;
+    flex-wrap:wrap;
+  }
+  .radio-pill{
+    display:flex;
+    align-items:center;
+    gap:6px;
+    font-family:var(--mono);
+    font-size:12px;
+    color:var(--ink);
+    cursor:pointer;
+  }
+  .radio-pill input{accent-color:var(--accent);}
+
+  .clock-detail{
+    margin-top:16px;
+    display:none;
+  }
+  .clock-detail.visible{display:block;}
+
+  .minutes-input{
+    display:flex;
+    align-items:center;
+    gap:10px;
+  }
+  .minutes-input input[type="number"]{
+    width:100px;
+    padding:9px 10px;
+    font-family:var(--mono);
+    font-size:14px;
+    border:1px solid var(--line);
+    background:var(--paper);
+    color:var(--ink);
+  }
+  .minutes-input span{
+    font-family:var(--mono);
+    font-size:11px;
+    color:var(--ink-soft);
+  }
+
+  .warning-note{
+    margin-top:14px;
+    font-family:var(--mono);
+    font-size:11px;
+    letter-spacing:0.02em;
+    color:#a3312c;
+    background:#f7e9e7;
+    border:1px solid #e3bcb8;
+    padding:10px 12px;
+    display:none;
+  }
+  .warning-note.visible{display:block;}
+
   /* Preview */
   .preview-wrap{
     display:flex;
@@ -156,7 +261,6 @@
   #previewCanvas{
     width:100%;
     max-width:720px;
-    aspect-ratio:720/240;
     border:1px solid var(--ink);
     display:block;
   }
@@ -213,6 +317,21 @@
   }
   .status.err{color:#a3312c;}
 
+  .progress-bar{
+    margin-top:10px;
+    height:4px;
+    background:var(--line);
+    width:100%;
+    display:none;
+  }
+  .progress-bar.visible{display:block;}
+  .progress-bar .fill{
+    height:100%;
+    width:0%;
+    background:var(--accent);
+    transition:width .15s linear;
+  }
+
   video{
     width:100%;
     max-width:720px;
@@ -238,7 +357,10 @@
 
 <div class="masthead">
   <h1>Text Frame</h1>
-  <div class="tag">720×240 / 1fps / 1sec</div>
+  <div style="display:flex; align-items:center; gap:10px;">
+    <span class="offline-badge" id="offlineBadge">オフライン利用可</span>
+    <div class="tag" id="dimsTag">720×240 / 1fps</div>
+  </div>
 </div>
 
 <main>
@@ -266,6 +388,16 @@
       </div>
     </div>
 
+    <div class="row">
+      <div class="field">
+        <label>文字の配置</label>
+        <div class="toggle-group" id="alignGroup">
+          <button type="button" data-align="left" class="active">左揃え</button>
+          <button type="button" data-align="center">中央揃え</button>
+        </div>
+      </div>
+    </div>
+
     <div class="slider-row">
       <label for="fontSize">文字サイズ <span class="value" id="fontSizeValue">64px</span></label>
       <input type="range" id="fontSize" min="10" max="180" value="64">
@@ -273,16 +405,39 @@
   </section>
 
   <section class="panel">
-    <h2>02 — プレビュー（720×240）</h2>
+    <h2>02 — ストップウォッチ / タイマー（オプション）</h2>
+
+    <div class="radio-group">
+      <label class="radio-pill"><input type="radio" name="clockMode" value="off" checked> なし</label>
+      <label class="radio-pill"><input type="radio" name="clockMode" value="stopwatch"> ストップウォッチ</label>
+      <label class="radio-pill"><input type="radio" name="clockMode" value="timer"> タイマー</label>
+    </div>
+
+    <div class="clock-detail" id="clockDetail">
+      <label for="clockMinutes">時間（分単位で指定・表示は秒付き）</label>
+      <div class="minutes-input">
+        <input type="number" id="clockMinutes" min="0" step="0.5" value="1">
+        <span>分</span>
+      </div>
+    </div>
+
+    <div class="warning-note" id="clockWarning">
+      時計オプションが有効な場合、実際に時間が進む動画を生成します。指定時間が長いほど生成に時間がかかります（動画の長さは指定分数+1秒）。
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>03 — プレビュー</h2>
     <div class="preview-wrap">
       <canvas id="previewCanvas" width="720" height="240"></canvas>
-      <div class="dims">この画像がそのまま動画の1フレーム目・唯一のフレームになります</div>
+      <div class="dims" id="dimsNote">画像はそのまま動画のフレームになります</div>
     </div>
 
     <div class="actions">
       <button id="generateBtn">動画を生成する（MP4）</button>
     </div>
     <div class="status" id="statusText"></div>
+    <div class="progress-bar" id="progressBar"><div class="fill" id="progressFill"></div></div>
 
     <video id="resultVideo" controls playsinline style="display:none;"></video>
 
@@ -295,10 +450,10 @@
 </main>
 
 <footer>
-  Text Frame — canvas + WebCodecs(VideoEncoder) + mp4-muxer で完結するクライアントサイド動画メーカー（MP4出力）。サーバー送信なし。
+  Text Frame — canvas + WebCodecs(VideoEncoder) + mp4-muxer（同梱・オフライン動作）で完結するクライアントサイド動画メーカー。サーバー送信なし。
 </footer>
 
-<script src="https://unpkg.com/mp4-muxer@5.2.2/build/mp4-muxer.js"></script>
+<script src="vendor/mp4-muxer.js"></script>
 <script>
 (function(){
   const textInput = document.getElementById('textInput');
@@ -308,24 +463,44 @@
   const bgColorHex = document.getElementById('bgColorHex');
   const fontSize = document.getElementById('fontSize');
   const fontSizeValue = document.getElementById('fontSizeValue');
+  const alignGroup = document.getElementById('alignGroup');
+  const clockDetail = document.getElementById('clockDetail');
+  const clockMinutes = document.getElementById('clockMinutes');
+  const clockWarning = document.getElementById('clockWarning');
   const canvas = document.getElementById('previewCanvas');
   const ctx = canvas.getContext('2d');
   const generateBtn = document.getElementById('generateBtn');
   const statusText = document.getElementById('statusText');
+  const progressBar = document.getElementById('progressBar');
+  const progressFill = document.getElementById('progressFill');
   const resultVideo = document.getElementById('resultVideo');
   const postActions = document.getElementById('postActions');
   const downloadBtn = document.getElementById('downloadBtn');
   const shareBtn = document.getElementById('shareBtn');
+  const dimsTag = document.getElementById('dimsTag');
+  const dimsNote = document.getElementById('dimsNote');
 
-  const W = 720, H = 240;
+  const W = 720;
+  let H = 240; // becomes 360 when clock is enabled
+  let textAlign = 'left'; // 'left' | 'center'
+  let clockMode = 'off';  // 'off' | 'stopwatch' | 'timer'
+
   let lastBlob = null;
   let lastUrl = null;
 
+  // ---------- Alignment toggle ----------
+  alignGroup.addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-align]');
+    if(!btn) return;
+    textAlign = btn.dataset.align;
+    [...alignGroup.querySelectorAll('button')].forEach(b => b.classList.toggle('active', b === btn));
+    draw();
+  });
+
+  // ---------- Color sync ----------
   function isValidHex(v){
     return /^#([0-9A-Fa-f]{6})$/.test(v);
   }
-
-  // Sync color picker <-> hex text field
   function bindColorPair(picker, hexField){
     picker.addEventListener('input', () => {
       hexField.value = picker.value.toUpperCase();
@@ -352,8 +527,31 @@
   });
   textInput.addEventListener('input', draw);
 
+  // ---------- Clock mode ----------
+  document.querySelectorAll('input[name="clockMode"]').forEach(radio => {
+    radio.addEventListener('change', (e) => {
+      clockMode = e.target.value;
+      const on = clockMode !== 'off';
+      clockDetail.classList.toggle('visible', on);
+      clockWarning.classList.toggle('visible', on);
+      updateCanvasSize();
+      draw();
+    });
+  });
+  clockMinutes.addEventListener('input', draw);
+
+  function updateCanvasSize(){
+    H = clockMode !== 'off' ? 360 : 240;
+    canvas.height = H;
+    canvas.style.aspectRatio = `${W}/${H}`;
+    dimsTag.textContent = `720×${H} / 1fps`;
+    dimsNote.textContent = clockMode !== 'off'
+      ? '時計はテキストの下に表示されます（720×360）'
+      : '画像はそのまま動画のフレームになります';
+  }
+
+  // ---------- Text wrapping ----------
   function wrapText(text, maxWidth, size){
-    // Support explicit newlines from the user, then wrap each line by width
     const paragraphs = text.split('\n');
     const lines = [];
     ctx.font = `700 ${size}px "Hiragino Sans","Noto Sans JP",sans-serif`;
@@ -375,7 +573,21 @@
     return lines;
   }
 
-  function draw(){
+  function formatClock(totalSeconds){
+    totalSeconds = Math.max(0, Math.round(totalSeconds));
+    const m = Math.floor(totalSeconds / 60);
+    const s = totalSeconds % 60;
+    return `${m}:${String(s).padStart(2,'0')}`;
+  }
+
+  function getDurationSeconds(){
+    const mins = parseFloat(clockMinutes.value);
+    if(isNaN(mins) || mins < 0) return 0;
+    return Math.round(mins * 60);
+  }
+
+  // elapsedSeconds: for stopwatch, seconds counted up from 0. For timer, seconds counted down from duration.
+  function draw(elapsedSeconds){
     const bg = bgColor.value;
     const fg = textColor.value;
     const size = parseInt(fontSize.value, 10);
@@ -386,20 +598,23 @@
     ctx.fillRect(0,0,W,H);
 
     ctx.fillStyle = fg;
-    ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
-    const maxWidth = W - 48;
+    const padX = 24;
+    const maxWidth = W - padX*2;
+
+    // Reserve space for clock area if enabled
+    const clockOn = clockMode !== 'off';
+    const clockAreaHeight = clockOn ? 90 : 0;
+    const textAreaHeight = H - clockAreaHeight;
+
     const lines = wrapText(text, maxWidth, size);
     const lineHeight = size * 1.2;
-    const totalHeight = lineHeight * lines.length;
-
-    // shrink font if total content overflows canvas height
     let effSize = size;
     let effLines = lines;
     let effLineHeight = lineHeight;
-    let effTotalHeight = totalHeight;
-    const maxHeight = H - 24;
+    let effTotalHeight = lineHeight * lines.length;
+    const maxHeight = textAreaHeight - 24;
     let guard = 0;
     while(effTotalHeight > maxHeight && effSize > 6 && guard < 40){
       effSize -= 2;
@@ -410,23 +625,42 @@
     }
 
     ctx.font = `700 ${effSize}px "Hiragino Sans","Noto Sans JP",sans-serif`;
-    const startY = H/2 - effTotalHeight/2 + effLineHeight/2;
+    ctx.textAlign = textAlign === 'left' ? 'left' : 'center';
+    const drawX = textAlign === 'left' ? padX : W/2;
+    const startY = textAreaHeight/2 - effTotalHeight/2 + effLineHeight/2;
     effLines.forEach((line, i) => {
-      ctx.fillText(line, W/2, startY + i*effLineHeight);
+      ctx.fillText(line, drawX, startY + i*effLineHeight);
     });
+
+    // Clock area
+    if(clockOn){
+      const duration = getDurationSeconds();
+      let seconds;
+      if(elapsedSeconds === undefined){
+        // preview default: stopwatch shows 0:00, timer shows full duration
+        seconds = clockMode === 'timer' ? duration : 0;
+      } else {
+        seconds = clockMode === 'timer' ? Math.max(0, duration - elapsedSeconds) : elapsedSeconds;
+      }
+      const label = formatClock(seconds);
+      const clockFontSize = Math.max(28, Math.min(56, Math.floor(clockAreaHeight * 0.55)));
+      ctx.font = `700 ${clockFontSize}px "JetBrains Mono","SFMono-Regular",Consolas,monospace`;
+      ctx.textAlign = textAlign === 'left' ? 'left' : 'center';
+      const clockY = textAreaHeight + clockAreaHeight/2;
+      ctx.fillText(label, drawX, clockY);
+    }
   }
 
+  updateCanvasSize();
   draw();
 
+  // ---------- Encoding ----------
   function isWebCodecsSupported(){
     return !!(window.VideoEncoder && window.VideoFrame && window.Mp4Muxer);
   }
 
-  async function generateVideoWebCodecs(){
+  async function encodeFrames(frameCount, drawFrame, onProgress){
     const fps = 1;
-    const durationSec = 1;
-    const frameCount = fps * durationSec; // 1 frame is enough for a 1s/1fps still video
-
     const muxer = new Mp4Muxer.Muxer({
       target: new Mp4Muxer.ArrayBufferTarget(),
       video: {
@@ -443,7 +677,7 @@
     });
 
     encoder.configure({
-      codec: 'avc1.42001f', // H.264 Baseline
+      codec: 'avc1.42001f',
       width: W,
       height: H,
       bitrate: 2_000_000,
@@ -453,6 +687,7 @@
     const frameDurationUs = Math.round(1_000_000 / fps);
 
     for(let i = 0; i < frameCount; i++){
+      drawFrame(i);
       const bitmap = await createImageBitmap(canvas);
       const frame = new VideoFrame(bitmap, {
         timestamp: i * frameDurationUs,
@@ -461,6 +696,9 @@
       encoder.encode(frame, { keyFrame: true });
       frame.close();
       bitmap.close();
+      if(onProgress) onProgress(i+1, frameCount);
+      // Yield to the UI thread so progress updates & the page stays responsive
+      await new Promise(r => setTimeout(r, 0));
     }
 
     await encoder.flush();
@@ -483,12 +721,30 @@
     generateBtn.disabled = true;
     postActions.style.display = 'none';
     resultVideo.style.display = 'none';
-
-    draw(); // ensure canvas reflects latest state
+    progressBar.classList.remove('visible');
+    progressFill.style.width = '0%';
 
     try {
-      statusText.textContent = '生成中…';
-      const mp4Blob = await generateVideoWebCodecs();
+      let mp4Blob;
+
+      if(clockMode === 'off'){
+        statusText.textContent = '生成中…';
+        draw();
+        mp4Blob = await encodeFrames(1, () => draw());
+      } else {
+        const duration = getDurationSeconds();
+        const frameCount = duration + 1; // +1 second as agreed (e.g. 3min => 181 frames)
+        progressBar.classList.add('visible');
+        statusText.textContent = `生成中… (0 / ${frameCount} フレーム)`;
+
+        mp4Blob = await encodeFrames(frameCount, (i) => {
+          draw(i);
+        }, (done, total) => {
+          const pct = Math.round(done/total*100);
+          progressFill.style.width = pct + '%';
+          statusText.textContent = `生成中… (${done} / ${total} フレーム)`;
+        });
+      }
 
       if(lastUrl) URL.revokeObjectURL(lastUrl);
       lastBlob = mp4Blob;
@@ -504,6 +760,8 @@
       statusText.classList.add('err');
     } finally {
       generateBtn.disabled = false;
+      progressBar.classList.remove('visible');
+      draw(); // restore preview to default state
     }
   }
 
@@ -546,6 +804,25 @@
       }
     }
   });
+
+  // ---------- Service Worker registration (offline support) ----------
+  const offlineBadge = document.getElementById('offlineBadge');
+  if('serviceWorker' in navigator){
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('sw.js').then((reg) => {
+        const markReady = () => offlineBadge.classList.add('ready');
+        if(reg.active) markReady();
+        reg.addEventListener('updatefound', () => {
+          const sw = reg.installing;
+          sw && sw.addEventListener('statechange', () => {
+            if(sw.state === 'activated') markReady();
+          });
+        });
+      }).catch((err) => {
+        console.warn('Service worker registration failed:', err);
+      });
+    });
+  }
 
 })();
 </script>

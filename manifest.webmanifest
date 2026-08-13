@@ -1,0 +1,10 @@
+{
+  "name": "Text Frame",
+  "short_name": "TextFrame",
+  "description": "テキストを720×240（またはタイマー付き720×360）のMP4動画に変換するツール",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#ECE7DD",
+  "theme_color": "#141311"
+}
