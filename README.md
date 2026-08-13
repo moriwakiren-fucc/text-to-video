@@ -26,7 +26,7 @@ https://<ユーザー名>.github.io/text-to-video/
 - 文字色・背景色をカラーピッカー／16進数コードの両方で指定可能
 - 文字サイズはスライダーで調整でき、プレビューに即時反映
 - 長い文字列は自動で改行・縮小し、720×240の枠内に収まるように描画
-- 生成される動画は 1fps・1秒間（同一フレームのみ）の `.mp4`（H.264）
+- 生成される動画は 1fps・1秒間（同一フレームのみ）の `.mp4`（H.264 / Baseline profile）
 - ダウンロード機能（`<a download>` によるローカル保存）
 - Web Share API による共有シート表示（対応端末のみ）
 
@@ -34,15 +34,15 @@ https://<ユーザー名>.github.io/text-to-video/
 
 - 素のHTML / CSS / JavaScriptのみで実装（フレームワーク・ビルド不要）
 - `<canvas>` にテキストを描画してプレビューを作成
-- `canvas.captureStream(1)` + `MediaRecorder` で 1fpsの映像ストリーム（webm）を録画
-- [`ffmpeg.wasm`](https://github.com/ffmpegwasm/ffmpeg.wasm)（CDN経由で読み込み）を使い、ブラウザ内でwebmをMP4（H.264）に変換
-- 外部への送信は行わず、変換処理も含めてすべてブラウザ内（クライアントサイド）で完結
+- [WebCodecs API](https://developer.mozilla.org/ja/docs/Web/API/WebCodecs_API)（`VideoEncoder` / `VideoFrame`）でcanvasの画像を直接H.264にエンコード
+- [`mp4-muxer`](https://github.com/Vanilagy/mp4-muxer)（CDN経由で読み込み、軽量なJS製MP4マルチプレクサ）でエンコード済みのフレームをMP4コンテナに格納
+- 巨大なWASMエンジン（ffmpeg.wasm等）を使わないため、初回読み込み・生成ともに高速
+- 外部への送信は行わず、すべてブラウザ内（クライアントサイド）で完結
 
 ## 動作環境について
 
-- 動画生成には `MediaRecorder` API が必要です。主要なモダンブラウザ（Chrome, Edge, Firefox など）で動作します。
-- MP4変換に `ffmpeg.wasm` を使用しているため、初回生成時は変換エンジン（WASM）のダウンロードに数秒〜十数秒かかります。2回目以降はキャッシュされ高速になります。
-- `ffmpeg.wasm` の利用には `SharedArrayBuffer` が必要な場合があり、ブラウザやホスティング環境のCOOP/COEPヘッダー設定によっては動作しないことがあります。GitHub Pagesでの動作に問題がある場合は、ffmpeg.wasmのマルチスレッド不要なsingle-threadビルドを使うよう調整してください。
+- 動画生成には **WebCodecs API**（`VideoEncoder` / `VideoFrame`）が必要です。2024年以降の Chrome / Edge など Chromium系ブラウザで動作します。Safari や Firefox は対応状況が限定的なため、非対応の場合はその旨を画面に表示します。
+- WebCodecsに対応していない環境では動画生成ができません。その場合はChromeやEdgeなど対応ブラウザでの利用をご案内ください。
 - 共有ボタンは `navigator.share` / `navigator.canShare` に対応した環境（主にスマートフォンのブラウザ）でのみ共有シートが表示されます。非対応環境では代わりにダウンロードをご利用ください。
 
 ## GitHub Pages での公開手順

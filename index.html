@@ -1,57 +1,554 @@
-# text-to-video
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Text Frame — 静止動画メーカー</title>
+<style>
+  :root{
+    --paper:#ECE7DD;
+    --ink:#141311;
+    --ink-soft:#5b574e;
+    --line:#c9c2b2;
+    --accent:#c65d2e;
+    --accent-soft:#e7cdb9;
+    --mono: "JetBrains Mono","SFMono-Regular",Consolas,monospace;
+    --serif: "Source Serif 4","Iowan Old Style",Georgia,serif;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--paper);
+    color:var(--ink);
+    font-family:var(--serif);
+    min-height:100vh;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    padding:48px 20px 80px;
+  }
 
-テキストを入力すると、指定した文字色・背景色・文字サイズで 720×240 の画像を作り、その画像だけを表示し続ける **1fps・1秒間の動画（webm）** を生成するツールです。サーバーを使わず、ブラウザだけで完結します。
+  .masthead{
+    width:100%;
+    max-width:920px;
+    border-bottom:2px solid var(--ink);
+    padding-bottom:14px;
+    margin-bottom:36px;
+    display:flex;
+    justify-content:space-between;
+    align-items:baseline;
+  }
+  .masthead h1{
+    font-size:26px;
+    margin:0;
+    letter-spacing:0.02em;
+    font-weight:600;
+  }
+  .masthead .tag{
+    font-family:var(--mono);
+    font-size:11px;
+    letter-spacing:0.12em;
+    text-transform:uppercase;
+    color:var(--ink-soft);
+  }
 
-GitHub Pages で公開して、そのままブラウザから使えます。
+  main{
+    width:100%;
+    max-width:920px;
+    display:grid;
+    grid-template-columns:1fr;
+    gap:28px;
+  }
 
-## デモ
+  .panel{
+    border:1px solid var(--line);
+    background:#fff;
+    padding:24px;
+  }
+  .panel h2{
+    font-family:var(--mono);
+    font-size:11px;
+    letter-spacing:0.14em;
+    text-transform:uppercase;
+    color:var(--ink-soft);
+    margin:0 0 18px;
+    padding-bottom:10px;
+    border-bottom:1px solid var(--line);
+  }
 
-`index.html` を GitHub Pages で公開すると、以下の URL でアクセスできます。
+  label{
+    display:block;
+    font-family:var(--mono);
+    font-size:11px;
+    letter-spacing:0.06em;
+    text-transform:uppercase;
+    color:var(--ink-soft);
+    margin-bottom:6px;
+  }
 
-```
-https://<ユーザー名>.github.io/text-to-video/
-```
+  textarea{
+    width:100%;
+    min-height:90px;
+    resize:vertical;
+    font-family:var(--serif);
+    font-size:16px;
+    padding:12px;
+    border:1px solid var(--line);
+    background:var(--paper);
+    color:var(--ink);
+  }
+  textarea:focus{outline:2px solid var(--accent); outline-offset:1px;}
 
-## 使い方
+  .row{
+    display:flex;
+    gap:20px;
+    margin-top:20px;
+    flex-wrap:wrap;
+  }
+  .field{flex:1; min-width:160px;}
 
-1. 入力欄に表示したい文字を入力する
-2. 文字色（初期値 `#FFFFFF`）と背景色（初期値 `#000000`）をカラーピッカーまたは16進数入力で指定する
-3. スライダーで文字サイズを調整する（プレビューにリアルタイムで反映される）
-4. プレビュー（720×240）で最終的な見た目を確認する
-5. 「動画を生成する」ボタンを押すと、その画像を1秒間表示し続ける動画が生成される
-6. 「ダウンロード」ボタンでファイルとして保存、または「共有」ボタンで端末の共有シートから共有できる
+  .color-input{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    border:1px solid var(--line);
+    background:var(--paper);
+    padding:6px 10px;
+  }
+  .color-input input[type="color"]{
+    width:34px; height:34px;
+    border:none;
+    padding:0;
+    background:none;
+    cursor:pointer;
+  }
+  .color-input input[type="text"]{
+    flex:1;
+    border:none;
+    background:none;
+    font-family:var(--mono);
+    font-size:13px;
+    color:var(--ink);
+    letter-spacing:0.04em;
+  }
+  .color-input input[type="text"]:focus{outline:none;}
 
-## 機能
+  .slider-row{
+    margin-top:20px;
+  }
+  .slider-row .value{
+    font-family:var(--mono);
+    font-size:12px;
+    color:var(--accent);
+  }
+  input[type="range"]{
+    width:100%;
+    margin-top:8px;
+    accent-color:var(--accent);
+  }
 
-- 文字色・背景色をカラーピッカー／16進数コードの両方で指定可能
-- 文字サイズはスライダーで調整でき、プレビューに即時反映
-- 長い文字列は自動で改行・縮小し、720×240の枠内に収まるように描画
-- 生成される動画は 1fps・1秒間（同一フレームのみ）の `.mp4`（H.264 / Baseline profile）
-- ダウンロード機能（`<a download>` によるローカル保存）
-- Web Share API による共有シート表示（対応端末のみ）
+  /* Preview */
+  .preview-wrap{
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+  }
+  #previewCanvas{
+    width:100%;
+    max-width:720px;
+    aspect-ratio:720/240;
+    border:1px solid var(--ink);
+    display:block;
+  }
+  .dims{
+    font-family:var(--mono);
+    font-size:11px;
+    color:var(--ink-soft);
+    margin-top:8px;
+    letter-spacing:0.05em;
+  }
 
-## 技術構成
+  /* Buttons */
+  .actions{
+    display:flex;
+    gap:12px;
+    flex-wrap:wrap;
+    margin-top:22px;
+  }
+  button{
+    font-family:var(--mono);
+    font-size:12px;
+    letter-spacing:0.08em;
+    text-transform:uppercase;
+    padding:12px 20px;
+    border:1px solid var(--ink);
+    background:var(--ink);
+    color:var(--paper);
+    cursor:pointer;
+    transition:background .15s ease, color .15s ease, opacity .15s ease;
+  }
+  button:hover{background:var(--accent); border-color:var(--accent);}
+  button.secondary{
+    background:transparent;
+    color:var(--ink);
+  }
+  button.secondary:hover{
+    background:var(--ink);
+    color:var(--paper);
+  }
+  button:disabled{
+    opacity:0.35;
+    cursor:not-allowed;
+    background:var(--ink);
+    color:var(--paper);
+  }
 
-- 素のHTML / CSS / JavaScriptのみで実装（フレームワーク・ビルド不要）
-- `<canvas>` にテキストを描画してプレビューを作成
-- [WebCodecs API](https://developer.mozilla.org/ja/docs/Web/API/WebCodecs_API)（`VideoEncoder` / `VideoFrame`）でcanvasの画像を直接H.264にエンコード
-- [`mp4-muxer`](https://github.com/Vanilagy/mp4-muxer)（CDN経由で読み込み、軽量なJS製MP4マルチプレクサ）でエンコード済みのフレームをMP4コンテナに格納
-- 巨大なWASMエンジン（ffmpeg.wasm等）を使わないため、初回読み込み・生成ともに高速
-- 外部への送信は行わず、すべてブラウザ内（クライアントサイド）で完結
+  .status{
+    font-family:var(--mono);
+    font-size:11px;
+    color:var(--ink-soft);
+    margin-top:14px;
+    letter-spacing:0.04em;
+    min-height:16px;
+  }
+  .status.err{color:#a3312c;}
 
-## 動作環境について
+  video{
+    width:100%;
+    max-width:720px;
+    border:1px solid var(--ink);
+    margin-top:18px;
+    background:#000;
+  }
 
-- 動画生成には **WebCodecs API**（`VideoEncoder` / `VideoFrame`）が必要です。2024年以降の Chrome / Edge など Chromium系ブラウザで動作します。Safari や Firefox は対応状況が限定的なため、非対応の場合はその旨を画面に表示します。
-- WebCodecsに対応していない環境では動画生成ができません。その場合はChromeやEdgeなど対応ブラウザでの利用をご案内ください。
-- 共有ボタンは `navigator.share` / `navigator.canShare` に対応した環境（主にスマートフォンのブラウザ）でのみ共有シートが表示されます。非対応環境では代わりにダウンロードをご利用ください。
+  footer{
+    max-width:920px;
+    width:100%;
+    margin-top:48px;
+    padding-top:14px;
+    border-top:1px solid var(--line);
+    font-family:var(--mono);
+    font-size:10.5px;
+    color:var(--ink-soft);
+    letter-spacing:0.04em;
+  }
+</style>
+</head>
+<body>
 
-## GitHub Pages での公開手順
+<div class="masthead">
+  <h1>Text Frame</h1>
+  <div class="tag">720×240 / 1fps / 1sec</div>
+</div>
 
-1. このリポジトリの `index.html` をリポジトリのルートに配置する
-2. GitHub の Settings → Pages を開く
-3. Source を `Deploy from a branch` にし、ブランチを `main`（または該当ブランチ）、フォルダを `/ (root)` に設定する
-4. 数分待つと、公開URLが表示される
+<main>
 
-## ライセンス
+  <section class="panel">
+    <h2>01 — テキストと配色</h2>
 
-特に指定がない場合は自由に利用・改変してください。
+    <label for="textInput">表示する文字</label>
+    <textarea id="textInput" placeholder="ここに文字を入力してください">Hello, World.</textarea>
+
+    <div class="row">
+      <div class="field">
+        <label for="textColor">文字色</label>
+        <div class="color-input">
+          <input type="color" id="textColor" value="#FFFFFF">
+          <input type="text" id="textColorHex" value="#FFFFFF" maxlength="7">
+        </div>
+      </div>
+      <div class="field">
+        <label for="bgColor">背景色</label>
+        <div class="color-input">
+          <input type="color" id="bgColor" value="#000000">
+          <input type="text" id="bgColorHex" value="#000000" maxlength="7">
+        </div>
+      </div>
+    </div>
+
+    <div class="slider-row">
+      <label for="fontSize">文字サイズ <span class="value" id="fontSizeValue">64px</span></label>
+      <input type="range" id="fontSize" min="10" max="180" value="64">
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>02 — プレビュー（720×240）</h2>
+    <div class="preview-wrap">
+      <canvas id="previewCanvas" width="720" height="240"></canvas>
+      <div class="dims">この画像がそのまま動画の1フレーム目・唯一のフレームになります</div>
+    </div>
+
+    <div class="actions">
+      <button id="generateBtn">動画を生成する（MP4）</button>
+    </div>
+    <div class="status" id="statusText"></div>
+
+    <video id="resultVideo" controls playsinline style="display:none;"></video>
+
+    <div class="actions" id="postActions" style="display:none;">
+      <button id="downloadBtn" class="secondary">ダウンロード</button>
+      <button id="shareBtn" class="secondary">共有</button>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  Text Frame — canvas + WebCodecs(VideoEncoder) + mp4-muxer で完結するクライアントサイド動画メーカー（MP4出力）。サーバー送信なし。
+</footer>
+
+<script src="https://unpkg.com/mp4-muxer@5.2.2/build/mp4-muxer.js"></script>
+<script>
+(function(){
+  const textInput = document.getElementById('textInput');
+  const textColor = document.getElementById('textColor');
+  const textColorHex = document.getElementById('textColorHex');
+  const bgColor = document.getElementById('bgColor');
+  const bgColorHex = document.getElementById('bgColorHex');
+  const fontSize = document.getElementById('fontSize');
+  const fontSizeValue = document.getElementById('fontSizeValue');
+  const canvas = document.getElementById('previewCanvas');
+  const ctx = canvas.getContext('2d');
+  const generateBtn = document.getElementById('generateBtn');
+  const statusText = document.getElementById('statusText');
+  const resultVideo = document.getElementById('resultVideo');
+  const postActions = document.getElementById('postActions');
+  const downloadBtn = document.getElementById('downloadBtn');
+  const shareBtn = document.getElementById('shareBtn');
+
+  const W = 720, H = 240;
+  let lastBlob = null;
+  let lastUrl = null;
+
+  function isValidHex(v){
+    return /^#([0-9A-Fa-f]{6})$/.test(v);
+  }
+
+  // Sync color picker <-> hex text field
+  function bindColorPair(picker, hexField){
+    picker.addEventListener('input', () => {
+      hexField.value = picker.value.toUpperCase();
+      draw();
+    });
+    hexField.addEventListener('input', () => {
+      let v = hexField.value.trim();
+      if(!v.startsWith('#')) v = '#' + v;
+      if(isValidHex(v)){
+        picker.value = v;
+        draw();
+      }
+    });
+    hexField.addEventListener('blur', () => {
+      hexField.value = picker.value.toUpperCase();
+    });
+  }
+  bindColorPair(textColor, textColorHex);
+  bindColorPair(bgColor, bgColorHex);
+
+  fontSize.addEventListener('input', () => {
+    fontSizeValue.textContent = fontSize.value + 'px';
+    draw();
+  });
+  textInput.addEventListener('input', draw);
+
+  function wrapText(text, maxWidth, size){
+    // Support explicit newlines from the user, then wrap each line by width
+    const paragraphs = text.split('\n');
+    const lines = [];
+    ctx.font = `700 ${size}px "Hiragino Sans","Noto Sans JP",sans-serif`;
+    paragraphs.forEach(p => {
+      if(p === ''){ lines.push(''); return; }
+      const chars = Array.from(p);
+      let current = '';
+      chars.forEach(ch => {
+        const test = current + ch;
+        if(ctx.measureText(test).width > maxWidth && current !== ''){
+          lines.push(current);
+          current = ch;
+        } else {
+          current = test;
+        }
+      });
+      if(current !== '') lines.push(current);
+    });
+    return lines;
+  }
+
+  function draw(){
+    const bg = bgColor.value;
+    const fg = textColor.value;
+    const size = parseInt(fontSize.value, 10);
+    const text = textInput.value || '';
+
+    ctx.clearRect(0,0,W,H);
+    ctx.fillStyle = bg;
+    ctx.fillRect(0,0,W,H);
+
+    ctx.fillStyle = fg;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    const maxWidth = W - 48;
+    const lines = wrapText(text, maxWidth, size);
+    const lineHeight = size * 1.2;
+    const totalHeight = lineHeight * lines.length;
+
+    // shrink font if total content overflows canvas height
+    let effSize = size;
+    let effLines = lines;
+    let effLineHeight = lineHeight;
+    let effTotalHeight = totalHeight;
+    const maxHeight = H - 24;
+    let guard = 0;
+    while(effTotalHeight > maxHeight && effSize > 6 && guard < 40){
+      effSize -= 2;
+      effLines = wrapText(text, maxWidth, effSize);
+      effLineHeight = effSize * 1.2;
+      effTotalHeight = effLineHeight * effLines.length;
+      guard++;
+    }
+
+    ctx.font = `700 ${effSize}px "Hiragino Sans","Noto Sans JP",sans-serif`;
+    const startY = H/2 - effTotalHeight/2 + effLineHeight/2;
+    effLines.forEach((line, i) => {
+      ctx.fillText(line, W/2, startY + i*effLineHeight);
+    });
+  }
+
+  draw();
+
+  function isWebCodecsSupported(){
+    return !!(window.VideoEncoder && window.VideoFrame && window.Mp4Muxer);
+  }
+
+  async function generateVideoWebCodecs(){
+    const fps = 1;
+    const durationSec = 1;
+    const frameCount = fps * durationSec; // 1 frame is enough for a 1s/1fps still video
+
+    const muxer = new Mp4Muxer.Muxer({
+      target: new Mp4Muxer.ArrayBufferTarget(),
+      video: {
+        codec: 'avc',
+        width: W,
+        height: H,
+      },
+      fastStart: 'in-memory',
+    });
+
+    const encoder = new VideoEncoder({
+      output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
+      error: (e) => { throw e; }
+    });
+
+    encoder.configure({
+      codec: 'avc1.42001f', // H.264 Baseline
+      width: W,
+      height: H,
+      bitrate: 2_000_000,
+      framerate: fps,
+    });
+
+    const frameDurationUs = Math.round(1_000_000 / fps);
+
+    for(let i = 0; i < frameCount; i++){
+      const bitmap = await createImageBitmap(canvas);
+      const frame = new VideoFrame(bitmap, {
+        timestamp: i * frameDurationUs,
+        duration: frameDurationUs,
+      });
+      encoder.encode(frame, { keyFrame: true });
+      frame.close();
+      bitmap.close();
+    }
+
+    await encoder.flush();
+    encoder.close();
+    muxer.finalize();
+
+    const { buffer } = muxer.target;
+    return new Blob([buffer], { type: 'video/mp4' });
+  }
+
+  async function generateVideo(){
+    statusText.classList.remove('err');
+
+    if(!isWebCodecsSupported()){
+      statusText.textContent = 'このブラウザは WebCodecs に対応していないため MP4 を生成できません（Chrome / Edge 等の最新版をご利用ください）。';
+      statusText.classList.add('err');
+      return;
+    }
+
+    generateBtn.disabled = true;
+    postActions.style.display = 'none';
+    resultVideo.style.display = 'none';
+
+    draw(); // ensure canvas reflects latest state
+
+    try {
+      statusText.textContent = '生成中…';
+      const mp4Blob = await generateVideoWebCodecs();
+
+      if(lastUrl) URL.revokeObjectURL(lastUrl);
+      lastBlob = mp4Blob;
+      lastUrl = URL.createObjectURL(mp4Blob);
+
+      resultVideo.src = lastUrl;
+      resultVideo.style.display = 'block';
+      postActions.style.display = 'flex';
+      statusText.textContent = `完了（${(mp4Blob.size/1024).toFixed(1)} KB, video/mp4）`;
+    } catch(err){
+      console.error(err);
+      statusText.textContent = '生成に失敗しました: ' + err.message;
+      statusText.classList.add('err');
+    } finally {
+      generateBtn.disabled = false;
+    }
+  }
+
+  generateBtn.addEventListener('click', generateVideo);
+
+  downloadBtn.addEventListener('click', () => {
+    if(!lastBlob) return;
+    const a = document.createElement('a');
+    a.href = lastUrl;
+    a.download = 'text-frame.mp4';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  });
+
+  shareBtn.addEventListener('click', async () => {
+    if(!lastBlob) return;
+    try {
+      const file = new File([lastBlob], 'text-frame.mp4', {type: lastBlob.type});
+      if(navigator.canShare && navigator.canShare({files:[file]})){
+        await navigator.share({
+          files:[file],
+          title:'Text Frame',
+          text:'Text Frameで作成した動画です。'
+        });
+      } else if(navigator.share){
+        await navigator.share({
+          title:'Text Frame',
+          text:'Text Frameで作成した動画です。',
+          url: lastUrl
+        });
+      } else {
+        statusText.textContent = 'この端末/ブラウザは共有シートに対応していません。ダウンロードをご利用ください。';
+      }
+    } catch(err){
+      if(err.name !== 'AbortError'){
+        console.error(err);
+        statusText.textContent = '共有に失敗しました: ' + err.message;
+        statusText.classList.add('err');
+      }
+    }
+  });
+
+})();
+</script>
+
+</body>
+</html>
