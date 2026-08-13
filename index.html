@@ -484,6 +484,7 @@
   let H = 240; // becomes 360 when clock is enabled
   let textAlign = 'left'; // 'left' | 'center'
   let clockMode = 'off';  // 'off' | 'stopwatch' | 'timer'
+  let resolvedAvcCodec = null; // cached working AVC level string, reset on canvas size change
 
   let lastBlob = null;
   let lastUrl = null;
@@ -541,7 +542,9 @@
   clockMinutes.addEventListener('input', draw);
 
   function updateCanvasSize(){
-    H = clockMode !== 'off' ? 360 : 240;
+    const newH = clockMode !== 'off' ? 360 : 240;
+    if(newH !== H) resolvedAvcCodec = null; // size changed, re-probe codec support
+    H = newH;
     canvas.height = H;
     canvas.style.aspectRatio = `${W}/${H}`;
     dimsTag.textContent = `720×${H} / 1fps`;
@@ -668,38 +671,58 @@
   })();
 
   // ---------- Encoding ----------
-  let webCodecsSupportChecked = false;
-  let webCodecsSupportResult = false;
+  // NOTE: support must be re-checked against the *current* W/H, since the
+  // clock option changes canvas size (240 <-> 360) after the initial check.
+  const AVC_LEVEL_CANDIDATES = ['1f', '28', '29', '2a']; // 3.1, 4.0, 4.1, 4.2
+  async function findWorkingAvcCodec(){
+    if(resolvedAvcCodec) return resolvedAvcCodec;
+    if(!(window.VideoEncoder && window.Mp4Muxer)) return null;
 
-  async function checkWebCodecsSupport(){
-    if(webCodecsSupportChecked) return webCodecsSupportResult;
-    webCodecsSupportChecked = true;
-
-    if(!(window.VideoEncoder && window.VideoFrame && window.Mp4Muxer)){
-      webCodecsSupportResult = false;
-      return false;
-    }
-
-    try {
+    for(const level of AVC_LEVEL_CANDIDATES){
+      const codec = `avc1.4200${level}`;
       const config = {
-        codec: 'avc1.42001f',
+        codec,
         width: W,
         height: H,
         bitrate: 2_000_000,
         framerate: 1,
       };
-      if(VideoEncoder.isConfigSupported){
-        const result = await VideoEncoder.isConfigSupported(config);
-        webCodecsSupportResult = !!(result && result.supported);
-      } else {
-        // Older browsers without isConfigSupported: assume it works,
-        // actual configure() will throw later if not.
-        webCodecsSupportResult = true;
+      try {
+        if(VideoEncoder.isConfigSupported){
+          const result = await VideoEncoder.isConfigSupported(config);
+          if(result && result.supported){
+            resolvedAvcCodec = codec;
+            return codec;
+          }
+        } else {
+          const probe = new VideoEncoder({ output(){}, error(){} });
+          probe.configure(config);
+          probe.close();
+          resolvedAvcCodec = codec;
+          return codec;
+        }
+      } catch(e){
+        // try next level
       }
-    } catch(e){
-      webCodecsSupportResult = false;
     }
-    return webCodecsSupportResult;
+    return null;
+  }
+
+  async function checkWebCodecsSupport(){
+    if(!(window.VideoEncoder && window.VideoFrame && window.Mp4Muxer)){
+      console.warn('[TextFrame] WebCodecs unavailable: missing VideoEncoder/VideoFrame/Mp4Muxer', {
+        VideoEncoder: !!window.VideoEncoder,
+        VideoFrame: !!window.VideoFrame,
+        Mp4Muxer: !!window.Mp4Muxer,
+      });
+      return false;
+    }
+    const codec = await findWorkingAvcCodec();
+    if(!codec){
+      console.warn('[TextFrame] No supported AVC level found for', W, H);
+      return false;
+    }
+    return true;
   }
 
   function getSupportedMp4MimeType(){
@@ -727,6 +750,9 @@
   // createImageBitmap so thousands of frames encode in a couple of seconds.
   async function encodeFramesWebCodecs(frameCount, drawFrame, onProgress){
     const fps = 1;
+    const codec = await findWorkingAvcCodec();
+    if(!codec) throw new Error('no supported AVC codec configuration found');
+
     const muxer = new Mp4Muxer.Muxer({
       target: new Mp4Muxer.ArrayBufferTarget(),
       video: {
@@ -744,7 +770,7 @@
     });
 
     encoder.configure({
-      codec: 'avc1.42001f',
+      codec,
       width: W,
       height: H,
       bitrate: 2_000_000,
