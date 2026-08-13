@@ -655,8 +655,9 @@
   draw();
 
   // Show which encoding path this device will use
-  (function showEngineBadge(){
-    if(isWebCodecsSupported()){
+  (async function showEngineBadge(){
+    const webCodecsOk = await checkWebCodecsSupport();
+    if(webCodecsOk){
       dimsNote.dataset.engine = 'webcodecs';
     } else if(isMediaRecorderMp4Supported()){
       dimsNote.dataset.engine = 'mediarecorder';
@@ -667,8 +668,38 @@
   })();
 
   // ---------- Encoding ----------
-  function isWebCodecsSupported(){
-    return !!(window.VideoEncoder && window.VideoFrame && window.Mp4Muxer);
+  let webCodecsSupportChecked = false;
+  let webCodecsSupportResult = false;
+
+  async function checkWebCodecsSupport(){
+    if(webCodecsSupportChecked) return webCodecsSupportResult;
+    webCodecsSupportChecked = true;
+
+    if(!(window.VideoEncoder && window.VideoFrame && window.Mp4Muxer)){
+      webCodecsSupportResult = false;
+      return false;
+    }
+
+    try {
+      const config = {
+        codec: 'avc1.42001f',
+        width: W,
+        height: H,
+        bitrate: 2_000_000,
+        framerate: 1,
+      };
+      if(VideoEncoder.isConfigSupported){
+        const result = await VideoEncoder.isConfigSupported(config);
+        webCodecsSupportResult = !!(result && result.supported);
+      } else {
+        // Older browsers without isConfigSupported: assume it works,
+        // actual configure() will throw later if not.
+        webCodecsSupportResult = true;
+      }
+    } catch(e){
+      webCodecsSupportResult = false;
+    }
+    return webCodecsSupportResult;
   }
 
   function getSupportedMp4MimeType(){
@@ -690,7 +721,10 @@
     return !!getSupportedMp4MimeType();
   }
 
-  // ---- Path A: WebCodecs + mp4-muxer (Chrome / Edge etc.) ----
+  // ---- Path A: WebCodecs + mp4-muxer (fast, no real-time wait) ----
+  // Frames are drawn synchronously to an OffscreenCanvas-free VideoFrame
+  // built directly from the 2D canvas, avoiding the per-frame await of
+  // createImageBitmap so thousands of frames encode in a couple of seconds.
   async function encodeFramesWebCodecs(frameCount, drawFrame, onProgress){
     const fps = 1;
     const muxer = new Mp4Muxer.Muxer({
@@ -703,9 +737,10 @@
       fastStart: 'in-memory',
     });
 
+    let pendingErr = null;
     const encoder = new VideoEncoder({
       output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
-      error: (e) => { throw e; }
+      error: (e) => { pendingErr = e; }
     });
 
     encoder.configure({
@@ -717,19 +752,34 @@
     });
 
     const frameDurationUs = Math.round(1_000_000 / fps);
+    const YIELD_EVERY = 25; // keep the UI responsive without slowing things down much
 
     for(let i = 0; i < frameCount; i++){
       drawFrame(i);
-      const bitmap = await createImageBitmap(canvas);
-      const frame = new VideoFrame(bitmap, {
+
+      // VideoFrame can be built directly from a canvas element synchronously —
+      // this is much faster than round-tripping through createImageBitmap().
+      const frame = new VideoFrame(canvas, {
         timestamp: i * frameDurationUs,
         duration: frameDurationUs,
       });
-      encoder.encode(frame, { keyFrame: true });
+      encoder.encode(frame, { keyFrame: (i % 30 === 0) });
       frame.close();
-      bitmap.close();
-      if(onProgress) onProgress(i+1, frameCount);
-      await new Promise(r => setTimeout(r, 0));
+
+      if(pendingErr) throw pendingErr;
+
+      if(onProgress && (i % 5 === 0 || i === frameCount - 1)) onProgress(i+1, frameCount);
+
+      // Periodically back off so encoder queue can drain and avoid
+      // "too many frames queued" errors on long videos, without stalling
+      // every single frame.
+      if(encoder.encodeQueueSize > 30){
+        await new Promise(resolve => {
+          encoder.addEventListener('dequeue', resolve, { once: true });
+        });
+      } else if(i % YIELD_EVERY === 0){
+        await new Promise(r => setTimeout(r, 0));
+      }
     }
 
     await encoder.flush();
@@ -782,7 +832,8 @@
   }
 
   async function encodeFrames(frameCount, drawFrame, onProgress){
-    if(isWebCodecsSupported()){
+    const webCodecsOk = await checkWebCodecsSupport();
+    if(webCodecsOk){
       return encodeFramesWebCodecs(frameCount, drawFrame, onProgress);
     }
     const mp4Mime = getSupportedMp4MimeType();
@@ -795,7 +846,8 @@
   async function generateVideo(){
     statusText.classList.remove('err');
 
-    if(!isWebCodecsSupported() && !isMediaRecorderMp4Supported()){
+    const webCodecsOk = await checkWebCodecsSupport();
+    if(!webCodecsOk && !isMediaRecorderMp4Supported()){
       statusText.textContent = 'このブラウザ・端末は MP4 動画の生成に対応していません。iPadの場合はSafari最新版でお試しください。';
       statusText.classList.add('err');
       return;
@@ -807,7 +859,7 @@
     progressBar.classList.remove('visible');
     progressFill.style.width = '0%';
 
-    const usingWebCodecs = isWebCodecsSupported();
+    const usingWebCodecs = webCodecsOk;
 
     try {
       let mp4Blob;
