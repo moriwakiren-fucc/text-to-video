@@ -437,6 +437,7 @@
       <button id="generateBtn">動画を生成する（MP4）</button>
     </div>
     <div class="status" id="statusText"></div>
+    <pre id="debugLog" style="display:none; margin-top:10px; padding:10px; background:#1c1a17; color:#c9e6c9; font-family:var(--mono); font-size:10.5px; line-height:1.6; overflow-x:auto; white-space:pre-wrap; word-break:break-all; max-height:260px; overflow-y:auto;"></pre>
     <div class="progress-bar" id="progressBar"><div class="fill" id="progressFill"></div></div>
 
     <video id="resultVideo" controls playsinline style="display:none;"></video>
@@ -479,6 +480,19 @@
   const shareBtn = document.getElementById('shareBtn');
   const dimsTag = document.getElementById('dimsTag');
   const dimsNote = document.getElementById('dimsNote');
+  const debugLog = document.getElementById('debugLog');
+
+  function logDebug(...args){
+    const line = args.map(a => {
+      if(a instanceof Error) return `${a.name}: ${a.message}`;
+      if(typeof a === 'object') { try { return JSON.stringify(a); } catch(e){ return String(a); } }
+      return String(a);
+    }).join(' ');
+    console.log('[TextFrame debug]', ...args);
+    debugLog.style.display = 'block';
+    debugLog.textContent += line + '\n';
+    debugLog.scrollTop = debugLog.scrollHeight;
+  }
 
   const W = 720;
   let H = 240; // becomes 360 when clock is enabled
@@ -664,6 +678,8 @@
 
   // Show which encoding path this device will use
   async function refreshEngineBadge(){
+    logDebug('UserAgent:', navigator.userAgent);
+    logDebug('window.VideoEncoder:', !!window.VideoEncoder, '| window.VideoFrame:', !!window.VideoFrame, '| window.Mp4Muxer:', !!window.Mp4Muxer, '| window.MediaRecorder:', !!window.MediaRecorder);
     const webCodecsOk = await checkWebCodecsSupport();
     if(webCodecsOk){
       dimsNote.dataset.engine = 'webcodecs';
@@ -690,7 +706,15 @@
   const AVC_LEVEL_CANDIDATES = ['1f', '28', '29', '2a']; // 3.1, 4.0, 4.1, 4.2
   async function findWorkingAvcCodec(){
     if(resolvedAvcCodec) return resolvedAvcCodec;
-    if(!(window.VideoEncoder && window.Mp4Muxer)) return null;
+    if(!(window.VideoEncoder && window.Mp4Muxer)){
+      logDebug('VideoEncoder or Mp4Muxer missing on window', {
+        VideoEncoder: !!window.VideoEncoder,
+        Mp4Muxer: !!window.Mp4Muxer,
+      });
+      return null;
+    }
+
+    logDebug('Probing AVC codec configs for', `${W}x${H}`, 'isConfigSupported available:', !!VideoEncoder.isConfigSupported);
 
     for(const level of AVC_LEVEL_CANDIDATES){
       const codec = `avc1.4200${level}`;
@@ -704,27 +728,35 @@
       try {
         if(VideoEncoder.isConfigSupported){
           const result = await VideoEncoder.isConfigSupported(config);
+          logDebug('isConfigSupported', codec, '->', result && result.supported, result && result.config ? JSON.stringify(result.config) : '');
           if(result && result.supported){
             resolvedAvcCodec = codec;
             return codec;
           }
         } else {
-          const probe = new VideoEncoder({ output(){}, error(){} });
+          const probe = new VideoEncoder({ output(){}, error(e){ logDebug('probe encoder error event', codec, e); } });
           probe.configure(config);
           probe.close();
+          logDebug('configure() succeeded (no isConfigSupported) for', codec);
           resolvedAvcCodec = codec;
           return codec;
         }
       } catch(e){
-        // try next level
+        logDebug('FAILED', codec, '->', e.name + ': ' + e.message);
       }
     }
+    logDebug('No AVC codec candidate worked out of', AVC_LEVEL_CANDIDATES.join(', '));
     return null;
   }
 
   async function checkWebCodecsSupport(){
     if(!(window.VideoEncoder && window.VideoFrame && window.Mp4Muxer)){
       console.warn('[TextFrame] WebCodecs unavailable: missing VideoEncoder/VideoFrame/Mp4Muxer', {
+        VideoEncoder: !!window.VideoEncoder,
+        VideoFrame: !!window.VideoFrame,
+        Mp4Muxer: !!window.Mp4Muxer,
+      });
+      logDebug('checkWebCodecsSupport: missing global(s)', {
         VideoEncoder: !!window.VideoEncoder,
         VideoFrame: !!window.VideoFrame,
         Mp4Muxer: !!window.Mp4Muxer,
@@ -739,26 +771,16 @@
       return false;
     }
     lastWebCodecsFailureReason = null;
+    logDebug('checkWebCodecsSupport: OK, using codec', codec);
     return true;
   }
 
   function getSupportedMp4MimeType(){
-    if(!window.MediaRecorder) return null;
-    const candidates = [
-      'video/mp4;codecs=avc1',
-      'video/mp4;codecs=h264',
-      'video/mp4'
-    ];
-    for(const c of candidates){
-      try {
-        if(MediaRecorder.isTypeSupported(c)) return c;
-      } catch(e){ /* ignore */ }
-    }
-    return null;
+    return null; // MediaRecorder real-time fallback disabled for debugging
   }
 
   function isMediaRecorderMp4Supported(){
-    return !!getSupportedMp4MimeType();
+    return false;
   }
 
   // ---- Path A: WebCodecs + mp4-muxer (fast, no real-time wait) ----
@@ -786,30 +808,76 @@
       error: (e) => { pendingErr = e; }
     });
 
-    encoder.configure({
-      codec,
-      width: W,
-      height: H,
-      bitrate: 2_000_000,
-      framerate: fps,
-    });
+    try {
+      encoder.configure({
+        codec,
+        width: W,
+        height: H,
+        bitrate: 2_000_000,
+        framerate: fps,
+      });
+      logDebug('encoder.configure() succeeded with', codec, `${W}x${H}`);
+    } catch(e){
+      logDebug('encoder.configure() THREW:', e.name + ': ' + e.message);
+      throw e;
+    }
 
     const frameDurationUs = Math.round(1_000_000 / fps);
     const YIELD_EVERY = 25; // keep the UI responsive without slowing things down much
 
+    // Some browsers (older Safari builds) don't support building a VideoFrame
+    // directly from a canvas element. Detect that once, up front, and fall
+    // back to createImageBitmap() only if needed — this keeps the fast path
+    // fast on browsers that do support it.
+    let useDirectCanvasFrame = true;
+    try {
+      drawFrame(0);
+      const testFrame = new VideoFrame(canvas, { timestamp: 0, duration: frameDurationUs });
+      testFrame.close();
+      logDebug('VideoFrame(canvas) direct construction: supported');
+    } catch(e){
+      useDirectCanvasFrame = false;
+      logDebug('VideoFrame(canvas) direct construction FAILED, falling back to createImageBitmap:', e.name + ': ' + e.message);
+    }
+
     for(let i = 0; i < frameCount; i++){
       drawFrame(i);
 
-      // VideoFrame can be built directly from a canvas element synchronously —
-      // this is much faster than round-tripping through createImageBitmap().
-      const frame = new VideoFrame(canvas, {
-        timestamp: i * frameDurationUs,
-        duration: frameDurationUs,
-      });
-      encoder.encode(frame, { keyFrame: (i % 30 === 0) });
+      let frame;
+      try {
+        if(useDirectCanvasFrame){
+          // VideoFrame can be built directly from a canvas element synchronously —
+          // this is much faster than round-tripping through createImageBitmap().
+          frame = new VideoFrame(canvas, {
+            timestamp: i * frameDurationUs,
+            duration: frameDurationUs,
+          });
+        } else {
+          const bitmap = await createImageBitmap(canvas);
+          frame = new VideoFrame(bitmap, {
+            timestamp: i * frameDurationUs,
+            duration: frameDurationUs,
+          });
+          bitmap.close();
+        }
+      } catch(e){
+        logDebug('VideoFrame construction failed at frame', i, ':', e.name + ': ' + e.message);
+        throw e;
+      }
+
+      try {
+        encoder.encode(frame, { keyFrame: (i % 30 === 0) });
+      } catch(e){
+        logDebug('encoder.encode() threw at frame', i, ':', e.name + ': ' + e.message);
+        frame.close();
+        throw e;
+      }
       frame.close();
 
-      if(pendingErr) throw pendingErr;
+      if(pendingErr){
+        logDebug('encoder error callback fired at frame', i, ':', pendingErr.name + ': ' + pendingErr.message);
+        throw pendingErr;
+      }
 
       if(onProgress && (i % 5 === 0 || i === frameCount - 1)) onProgress(i+1, frameCount);
 
@@ -939,7 +1007,9 @@
       statusText.textContent = `完了（${(mp4Blob.size/1024).toFixed(1)} KB, video/mp4）`;
     } catch(err){
       console.error(err);
-      statusText.textContent = '生成に失敗しました: ' + err.message;
+      logDebug('generateVideo() caught error:', (err && err.name) || 'Error', ':', (err && err.message) || String(err));
+      if(err && err.stack) logDebug('stack:', String(err.stack).split('\n').slice(0,3).join(' | '));
+      statusText.textContent = '生成に失敗しました: ' + (err && err.message ? err.message : String(err));
       statusText.classList.add('err');
     } finally {
       generateBtn.disabled = false;
