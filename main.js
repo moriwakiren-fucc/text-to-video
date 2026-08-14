@@ -529,16 +529,24 @@
   // webkit-prefixed presentation-mode API on <video>, while Chromium/most
   // modern browsers use the standard requestPictureInPicture(). We detect
   // and support both so the button works consistently across devices.
+  //
+  // NOTE: document.pictureInPictureEnabled and
+  // video.webkitSupportsPresentationMode('picture-in-picture') can both
+  // report unreliable/false-negative values in certain contexts — most
+  // notably inside an iPadOS home-screen PWA (standalone display mode)
+  // before the video's metadata has loaded. To avoid hiding a button that
+  // would actually work, we treat *presence of the API* as "supported"
+  // and let the actual call surface a real error if it truly isn't.
   function isPipSupported(){
-    const standard = typeof resultVideo.requestPictureInPicture === 'function'
-      && document.pictureInPictureEnabled !== false;
-    const webkitLegacy = typeof resultVideo.webkitSupportsPresentationMode === 'function'
-      && typeof resultVideo.webkitSetPresentationMode === 'function';
+    const standard = typeof resultVideo.requestPictureInPicture === 'function';
+    const webkitLegacy = typeof resultVideo.webkitSetPresentationMode === 'function';
     return standard || webkitLegacy;
   }
 
   function isCurrentlyInPip(){
-    if(document.pictureInPictureElement === resultVideo) return true;
+    try {
+      if(document.pictureInPictureElement === resultVideo) return true;
+    } catch(e){ /* some WebKit builds throw when accessing this in standalone mode */ }
     if(resultVideo.webkitPresentationMode === 'picture-in-picture') return true;
     return false;
   }
@@ -554,17 +562,29 @@
         return;
       }
 
-      if(typeof resultVideo.requestPictureInPicture === 'function'){
-        await resultVideo.requestPictureInPicture();
-      } else if(typeof resultVideo.webkitSetPresentationMode === 'function'){
-        // iPadOS/Safari legacy path
+      // Prefer the legacy webkit path first when available: on iPadOS
+      // (including standalone/PWA mode) it tends to be the more reliable
+      // of the two, even when both APIs technically exist.
+      if(typeof resultVideo.webkitSetPresentationMode === 'function'){
         resultVideo.webkitSetPresentationMode('picture-in-picture');
+      } else if(typeof resultVideo.requestPictureInPicture === 'function'){
+        await resultVideo.requestPictureInPicture();
       } else {
         statusText.textContent = 'この端末/ブラウザはピクチャー・イン・ピクチャーに対応していません。';
         return;
       }
     } catch(err){
       console.error(err);
+      // Fallback: if the preferred path threw (e.g. legacy API exists but
+      // refuses in this context), try the other API before giving up.
+      try {
+        if(typeof resultVideo.requestPictureInPicture === 'function' && !isCurrentlyInPip()){
+          await resultVideo.requestPictureInPicture();
+          return;
+        }
+      } catch(fallbackErr){
+        console.error(fallbackErr);
+      }
       statusText.textContent = 'ピクチャー・イン・ピクチャーの開始に失敗しました: ' + (err && err.message ? err.message : String(err));
       statusText.classList.add('err');
     }
@@ -589,6 +609,10 @@
   function refreshPipButtonVisibility(){
     pipBtn.style.display = isPipSupported() ? '' : 'none';
   }
+
+  // メタデータのロード前後でAPIの見え方が変わることがあるため、
+  // ロード完了時にも再評価しておく（特にPWA/standaloneモード対策）
+  resultVideo.addEventListener('loadedmetadata', refreshPipButtonVisibility);
 
   generateBtn.addEventListener('click', generateVideo);
 

@@ -6,6 +6,9 @@
 <title>Text Frame — 静止動画メーカー</title>
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#141311">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Text Frame">
 <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
 <link rel="apple-touch-icon" sizes="152x152" href="icons/icon-152.png">
 <link rel="apple-touch-icon" sizes="167x167" href="icons/icon-167.png">
@@ -131,7 +134,7 @@
 <script>
   // このページの現在のバージョン。update.json の "version" と比較されます。
   // リリースごとにここと update.json の両方を更新してください。
-  window.APP_VERSION = '1.2.0';
+  window.APP_VERSION = '1.2.1';
   document.addEventListener('DOMContentLoaded', () => {
     const el = document.getElementById('versionFooter');
     if(el) el.textContent = window.APP_VERSION;
