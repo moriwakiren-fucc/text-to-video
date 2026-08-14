@@ -485,6 +485,7 @@
   let textAlign = 'left'; // 'left' | 'center'
   let clockMode = 'off';  // 'off' | 'stopwatch' | 'timer'
   let resolvedAvcCodec = null; // cached working AVC level string, reset on canvas size change
+  let lastWebCodecsFailureReason = null;
 
   let lastBlob = null;
   let lastUrl = null;
@@ -537,19 +538,23 @@
       clockWarning.classList.toggle('visible', on);
       updateCanvasSize();
       draw();
+      refreshEngineBadge();
     });
   });
   clockMinutes.addEventListener('input', draw);
 
   function updateCanvasSize(){
-    const newH = clockMode !== 'off' ? 360 : 240;
+    // 368 is the nearest multiple of 16 at/above 360, which keeps the
+    // canvas height H.264-encoder-friendly (VideoToolbox on iPadOS/Safari
+    // rejects heights that aren't multiples of 16 for some AVC levels).
+    const newH = clockMode !== 'off' ? 368 : 240;
     if(newH !== H) resolvedAvcCodec = null; // size changed, re-probe codec support
     H = newH;
     canvas.height = H;
     canvas.style.aspectRatio = `${W}/${H}`;
     dimsTag.textContent = `720×${H} / 1fps`;
     dimsNote.textContent = clockMode !== 'off'
-      ? '時計はテキストの下に表示されます（720×360）'
+      ? '時計はテキストの下に表示されます（720×368）'
       : '画像はそのまま動画のフレームになります';
   }
 
@@ -658,17 +663,26 @@
   draw();
 
   // Show which encoding path this device will use
-  (async function showEngineBadge(){
+  async function refreshEngineBadge(){
     const webCodecsOk = await checkWebCodecsSupport();
     if(webCodecsOk){
       dimsNote.dataset.engine = 'webcodecs';
+      if(statusText.dataset.engineNote === '1'){
+        statusText.textContent = '';
+        statusText.dataset.engineNote = '';
+      }
     } else if(isMediaRecorderMp4Supported()){
       dimsNote.dataset.engine = 'mediarecorder';
+      const reason = lastWebCodecsFailureReason ? `（${lastWebCodecsFailureReason}）` : '';
+      statusText.textContent = `高速生成方式が使えないため、実時間録画方式を使用します${reason}`;
+      statusText.dataset.engineNote = '1';
     } else {
       dimsNote.dataset.engine = 'unsupported';
       statusText.textContent = 'この端末・ブラウザは MP4 生成に対応していない可能性があります。生成ボタンを押してご確認ください。';
+      statusText.dataset.engineNote = '1';
     }
-  })();
+  }
+  refreshEngineBadge();
 
   // ---------- Encoding ----------
   // NOTE: support must be re-checked against the *current* W/H, since the
@@ -715,13 +729,16 @@
         VideoFrame: !!window.VideoFrame,
         Mp4Muxer: !!window.Mp4Muxer,
       });
+      lastWebCodecsFailureReason = 'このブラウザに VideoEncoder / VideoFrame API がありません';
       return false;
     }
     const codec = await findWorkingAvcCodec();
     if(!codec){
       console.warn('[TextFrame] No supported AVC level found for', W, H);
+      lastWebCodecsFailureReason = `${W}×${H} に対応するH.264設定が見つかりませんでした`;
       return false;
     }
+    lastWebCodecsFailureReason = null;
     return true;
   }
 
