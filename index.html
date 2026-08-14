@@ -454,7 +454,7 @@
   Text Frame — canvas + WebCodecs / MediaRecorder（iPad Safari対応）+ mp4-muxer（同梱・オフライン動作）で完結するクライアントサイド動画メーカー。サーバー送信なし。
 </footer>
 
-<script src="vendor/mp4-muxer.js"></script>
+<script src="vendor/mp4-muxer.js" onerror="window.__mp4MuxerLoadFailed = true; console.error('[TextFrame] vendor/mp4-muxer.js failed to load (404 or blocked)');"></script>
 <script>
 (function(){
   const textInput = document.getElementById('textInput');
@@ -680,6 +680,25 @@
   async function refreshEngineBadge(){
     logDebug('UserAgent:', navigator.userAgent);
     logDebug('window.VideoEncoder:', !!window.VideoEncoder, '| window.VideoFrame:', !!window.VideoFrame, '| window.Mp4Muxer:', !!window.Mp4Muxer, '| window.MediaRecorder:', !!window.MediaRecorder);
+
+    if(!window.Mp4Muxer){
+      if(window.__mp4MuxerLoadFailed){
+        logDebug('vendor/mp4-muxer.js: <script onerror> fired — file did not load (check path/deploy)');
+      } else {
+        logDebug('vendor/mp4-muxer.js: script tag loaded without onerror, but window.Mp4Muxer is still undefined (possible parse error or different export name)');
+      }
+      // Try a direct fetch to see the actual HTTP status / content, which
+      // tells us definitively whether it's a 404, a redirect to index.html
+      // (common GitHub Pages misconfiguration), or something else.
+      try {
+        const res = await fetch('vendor/mp4-muxer.js', { cache: 'no-store' });
+        const text = await res.text();
+        logDebug('fetch vendor/mp4-muxer.js ->', res.status, res.headers.get('content-type'), '| length:', text.length, '| starts with:', JSON.stringify(text.slice(0, 60)));
+      } catch(e){
+        logDebug('fetch vendor/mp4-muxer.js threw:', e.name + ': ' + e.message);
+      }
+    }
+
     const webCodecsOk = await checkWebCodecsSupport();
     if(webCodecsOk){
       dimsNote.dataset.engine = 'webcodecs';
