@@ -14,7 +14,16 @@ const PRECACHE_URLS = [
   './main.js',
   './update.js',
   './vendor/mp4-muxer.js',
-  './manifest.webmanifest'
+  './manifest.webmanifest',
+  './apple-touch-icon.png',
+  './icons/icon-120.png',
+  './icons/icon-152.png',
+  './icons/icon-167.png',
+  './icons/icon-180.png',
+  './icons/icon-192.png',
+  './icons/icon-512.png',
+  './icons/icon-32.png',
+  './icons/icon-16.png'
 ];
 
 // update.json はキャッシュ経由で返さない（常に最新版と比較したいため）

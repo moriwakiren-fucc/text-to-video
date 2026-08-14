@@ -41,6 +41,8 @@ https://<ユーザー名>.github.io/text-to-video/
 - ダウンロード機能（`<a download>` によるローカル保存）
 - Web Share API による共有シート表示（対応端末のみ）
 - **オフライン対応**：Service Workerにより初回アクセス後はネット接続なしでもページ表示・操作・動画生成（MP4変換含む）が可能
+- **入力内容の自動保存**：テキスト・文字色・背景色・文字サイズ・配置・時計モード・時計の時間設定を、ブラウザの`localStorage`に自動保存し、次回アクセス時に復元する
+- **ホーム画面追加用アイコン**：`apple-touch-icon`を含む各サイズのアイコンを用意しており、iPadやスマートフォンでホーム画面に追加した際にアプリらしいアイコンで表示される
 
 ## 技術構成
 
@@ -54,7 +56,7 @@ https://<ユーザー名>.github.io/text-to-video/
 
 ## オフライン対応の仕組み
 
-- 初回アクセス時、`sw.js` が `index.html` / `style.css` / `main.js` / `update.js` / `vendor/mp4-muxer.js` / `manifest.webmanifest` などをキャッシュに保存します。
+- 初回アクセス時、`sw.js` が `index.html` / `style.css` / `main.js` / `update.js` / `vendor/mp4-muxer.js` / `manifest.webmanifest` / アイコン各種などをキャッシュに保存します。
 - 2回目以降のアクセスでは、ネット接続がなくてもキャッシュから読み込まれ、ページ表示・プレビュー編集・MP4動画生成・再生まで一通り行えます。
 - ページ右上に「オフライン利用可」バッジが表示されたら、Service Workerの準備が完了した合図です。
 - `sw.js` 内のキャッシュはバージョン管理されており（`CACHE_VERSION`）、ファイルを更新した場合はこの値を変更することでキャッシュが更新されます。
@@ -95,29 +97,47 @@ https://<ユーザー名>.github.io/text-to-video/
 - 共有ボタンは `navigator.share` / `navigator.canShare` に対応した環境（主にスマートフォンのブラウザ）でのみ共有シートが表示されます。非対応環境では代わりにダウンロードをご利用ください。
 - 数千フレーム規模（数十分の動画）になると、エンコード処理自体に一定の時間がかかります。生成中は進捗バーで状況を確認できます。
 
+## 入力内容の自動保存について
+
+- テキスト・文字色・背景色・文字サイズ・配置・時計モード（なし／ストップウォッチ／タイマー）・時計の時間設定は、変更するたびにブラウザの`localStorage`へ自動保存されます。
+- 次回ページを開いた時、保存されていた内容が自動的に復元されます。
+- サーバーには一切送信されず、その端末・ブラウザの中だけに保存されます。
+- プライベートブラウズモードなど`localStorage`が使えない環境では、保存は行われませんが、通常の利用に支障はありません（毎回初期値からのスタートになるだけです）。
+
 ## リポジトリ構成
 
 ```
 text-to-video/
-├── index.html              # メインページ（HTML構造のみ）
-├── style.css                # スタイル
-├── main.js                  # UI操作・描画・動画エンコード処理
-├── update.js                 # アップデート通知システム
-├── update.json               # 最新バージョン番号・更新内容
-├── sw.js                    # Service Worker（オフラインキャッシュ）
-├── manifest.webmanifest     # PWAマニフェスト
+├── index.html                # メインページ（HTML構造のみ）
+├── style.css                 # スタイル
+├── main.js                   # UI操作・描画・動画エンコード処理
+├── update.js                  # アップデート通知システム
+├── update.json                # 最新バージョン番号・更新内容
+├── sw.js                     # Service Worker（オフラインキャッシュ）
+├── manifest.webmanifest      # PWAマニフェスト
+├── apple-touch-icon.png       # iOS/iPadOSホーム画面用アイコン（180×180）
+├── icons/
+│   ├── icon-16.png
+│   ├── icon-32.png
+│   ├── icon-120.png
+│   ├── icon-152.png
+│   ├── icon-167.png
+│   ├── icon-180.png
+│   ├── icon-192.png
+│   └── icon-512.png
 ├── vendor/
-│   └── mp4-muxer.js         # mp4-muxerライブラリ（同梱・CDN不要）
+│   └── mp4-muxer.js          # mp4-muxerライブラリ（同梱・CDN不要）
 └── README.md
 ```
 
 ## GitHub Pages での公開手順
 
-1. このリポジトリの `index.html` / `style.css` / `main.js` / `update.js` / `update.json` / `sw.js` / `manifest.webmanifest` / `vendor/` フォルダをリポジトリのルートに配置する（フォルダ構成を保つこと）
+1. このリポジトリの `index.html` / `style.css` / `main.js` / `update.js` / `update.json` / `sw.js` / `manifest.webmanifest` / `apple-touch-icon.png` / `icons/` フォルダ / `vendor/` フォルダをリポジトリのルートに配置する（フォルダ構成を保つこと）
 2. GitHub の Settings → Pages を開く
 3. Source を `Deploy from a branch` にし、ブランチを `main`（または該当ブランチ）、フォルダを `/ (root)` に設定する
 4. 数分待つと、公開URLが表示される
 5. 一度ページを開いてService Workerの登録が完了すれば（右上に「オフライン利用可」と表示される）、以降はオフラインでも利用できる
+6. iPadやiPhoneでSafariから開き、共有メニュー →「ホーム画面に追加」を選ぶと、専用アイコン付きでホーム画面に追加できる
 
 ## ライセンス
 

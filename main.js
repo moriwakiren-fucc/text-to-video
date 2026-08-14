@@ -33,6 +33,79 @@
   let lastBlob = null;
   let lastUrl = null;
 
+  // ---------- Persisted settings (last-used values) ----------
+  const STORAGE_KEY = 'textFrame.lastSettings.v1';
+
+  function loadSavedSettings(){
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if(!raw) return null;
+      return JSON.parse(raw);
+    } catch(e){
+      console.warn('[TextFrame] 保存された設定の読み込みに失敗しました:', e);
+      return null;
+    }
+  }
+
+  function saveSettings(){
+    try {
+      const data = {
+        text: textInput.value,
+        textColor: textColor.value,
+        bgColor: bgColor.value,
+        fontSize: fontSize.value,
+        textAlign: textAlign,
+        clockMode: clockMode,
+        clockMinutes: clockMinutes.value,
+      };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    } catch(e){
+      // 保存できなくても致命的ではないため、静かに無視する
+      // (プライベートブラウズモードなどでは例外が出ることがある)
+    }
+  }
+
+  function applySavedSettings(){
+    const saved = loadSavedSettings();
+    if(!saved) return;
+
+    if(typeof saved.text === 'string') textInput.value = saved.text;
+
+    if(typeof saved.textColor === 'string' && isValidHex(saved.textColor)){
+      textColor.value = saved.textColor;
+      textColorHex.value = saved.textColor.toUpperCase();
+    }
+    if(typeof saved.bgColor === 'string' && isValidHex(saved.bgColor)){
+      bgColor.value = saved.bgColor;
+      bgColorHex.value = saved.bgColor.toUpperCase();
+    }
+    if(saved.fontSize){
+      const n = parseInt(saved.fontSize, 10);
+      if(!isNaN(n) && n >= parseInt(fontSize.min,10) && n <= parseInt(fontSize.max,10)){
+        fontSize.value = String(n);
+        fontSizeValue.textContent = n + 'px';
+      }
+    }
+    if(saved.textAlign === 'left' || saved.textAlign === 'center'){
+      textAlign = saved.textAlign;
+      [...alignGroup.querySelectorAll('button')].forEach(b => {
+        b.classList.toggle('active', b.dataset.align === textAlign);
+      });
+    }
+    if(saved.clockMode === 'off' || saved.clockMode === 'stopwatch' || saved.clockMode === 'timer'){
+      clockMode = saved.clockMode;
+      const radio = document.querySelector(`input[name="clockMode"][value="${clockMode}"]`);
+      if(radio) radio.checked = true;
+      const on = clockMode !== 'off';
+      clockDetail.classList.toggle('visible', on);
+      clockWarning.classList.toggle('visible', on);
+    }
+    if(saved.clockMinutes !== undefined && saved.clockMinutes !== null && saved.clockMinutes !== ''){
+      const m = parseFloat(saved.clockMinutes);
+      if(!isNaN(m) && m >= 0) clockMinutes.value = String(m);
+    }
+  }
+
   // ---------- Alignment toggle ----------
   alignGroup.addEventListener('click', (e) => {
     const btn = e.target.closest('button[data-align]');
@@ -40,6 +113,7 @@
     textAlign = btn.dataset.align;
     [...alignGroup.querySelectorAll('button')].forEach(b => b.classList.toggle('active', b === btn));
     draw();
+    saveSettings();
   });
 
   // ---------- Color sync ----------
@@ -50,6 +124,7 @@
     picker.addEventListener('input', () => {
       hexField.value = picker.value.toUpperCase();
       draw();
+      saveSettings();
     });
     hexField.addEventListener('input', () => {
       let v = hexField.value.trim();
@@ -57,6 +132,7 @@
       if(isValidHex(v)){
         picker.value = v;
         draw();
+        saveSettings();
       }
     });
     hexField.addEventListener('blur', () => {
@@ -69,8 +145,12 @@
   fontSize.addEventListener('input', () => {
     fontSizeValue.textContent = fontSize.value + 'px';
     draw();
+    saveSettings();
   });
-  textInput.addEventListener('input', draw);
+  textInput.addEventListener('input', () => {
+    draw();
+    saveSettings();
+  });
 
   // ---------- Clock mode ----------
   document.querySelectorAll('input[name="clockMode"]').forEach(radio => {
@@ -82,9 +162,13 @@
       updateCanvasSize();
       draw();
       refreshEngineBadge();
+      saveSettings();
     });
   });
-  clockMinutes.addEventListener('input', draw);
+  clockMinutes.addEventListener('input', () => {
+    draw();
+    saveSettings();
+  });
 
   function updateCanvasSize(){
     // 368 is the nearest multiple of 16 at/above 360, which keeps the
@@ -202,6 +286,8 @@
     }
   }
 
+  // 保存された前回の入力内容・設定があれば復元してから初期描画する
+  applySavedSettings();
   updateCanvasSize();
   draw();
 
