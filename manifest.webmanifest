@@ -4,7 +4,7 @@
   "description": "テキストを720×240（またはタイマー付き720×368）のMP4動画に変換するツール",
   "start_url": "./index.html",
   "scope": "./",
-  "display": "minimal-ui",
+  "display": "browser",
   "background_color": "#ECE7DD",
   "theme_color": "#141311",
   "icons": [
