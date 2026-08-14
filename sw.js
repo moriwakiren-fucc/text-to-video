@@ -1,14 +1,30 @@
 // Text Frame — Service Worker
 // キャッシュにより、初回アクセス後はオフラインでもページ表示・動画生成（MP4変換含む）が可能になります。
 // 依存ライブラリ（mp4-muxer）もすべてローカル同梱（vendor/）のためCDN接続は不要です。
+//
+// バージョン確認の仕組み上、update.json は常にネットワークから最新のものを
+// 取得する必要があるため、キャッシュ対象から除外し、fetchハンドラでも
+// network-first（かつキャッシュへの保存もしない）で扱います。
 
-const CACHE_VERSION = 'text-frame-v1';
+const CACHE_VERSION = 'text-frame-v3';
 const PRECACHE_URLS = [
   './',
   './index.html',
+  './style.css',
+  './main.js',
+  './update.js',
   './vendor/mp4-muxer.js',
   './manifest.webmanifest'
 ];
+
+// update.json はキャッシュ経由で返さない（常に最新版と比較したいため）
+const NETWORK_ONLY_PATTERNS = [
+  /update\.json(\?.*)?$/
+];
+
+function isNetworkOnly(url){
+  return NETWORK_ONLY_PATTERNS.some((re) => re.test(url));
+}
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -30,12 +46,27 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-// Cache-first strategy: serve from cache when available, otherwise fetch
-// and store a copy for next time. This keeps the app fully usable offline
-// after the first successful visit.
 self.addEventListener('fetch', (event) => {
   if(event.request.method !== 'GET') return;
 
+  const url = event.request.url;
+
+  // update.json: 常にネットワークから取得し、キャッシュには保存しない。
+  // オフライン時はエラーを返す（update.js 側で静かに諦める設計）。
+  if(isNetworkOnly(url)){
+    event.respondWith(
+      fetch(event.request, { cache: 'no-store' }).catch((err) => {
+        return new Response(JSON.stringify({ error: 'offline' }), {
+          status: 503,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      })
+    );
+    return;
+  }
+
+  // それ以外は cache-first: キャッシュにあればそれを返し、なければ取得して
+  // 次回のためにキャッシュへ保存する。これによりオフラインでも一通り使える。
   event.respondWith(
     caches.match(event.request).then((cached) => {
       if(cached) return cached;
@@ -60,3 +91,4 @@ self.addEventListener('fetch', (event) => {
     })
   );
 });
+
