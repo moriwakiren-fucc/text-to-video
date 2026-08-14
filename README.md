@@ -46,45 +46,74 @@ https://<ユーザー名>.github.io/text-to-video/
 
 - 素のHTML / CSS / JavaScriptのみで実装（フレームワーク・ビルド不要）
 - `<canvas>` にテキスト・時計を描画してプレビューを作成
-- MP4への変換は端末の対応状況に応じて2つの方式を自動選択：
-  - **WebCodecs API**（`VideoEncoder` / `VideoFrame`）+ [`mp4-muxer`](https://github.com/Vanilagy/mp4-muxer)（**リポジトリに同梱・`vendor/mp4-muxer.js`**）: Chrome / Edge など Chromium系ブラウザ向け。高速でファイルサイズも小さい
-  - **MediaRecorder API による直接MP4録画**: iPad / iPhone の Safari など、WebCodecsに対応していない端末向け。`canvas.captureStream(1)` で1fpsの映像を実時間で録画する
+- MP4への変換は **WebCodecs API**（`VideoEncoder` / `VideoFrame`）+ [`mp4-muxer`](https://github.com/Vanilagy/mp4-muxer)（**リポジトリに同梱・`vendor/mp4-muxer.js`**）で行う
+  - フレームはcanvasから直接同期的に`VideoFrame`を生成してエンコードするため、数千フレーム（数十分の動画）でも数十秒〜数分程度で完了する
 - CDNに依存せずローカルファイルとして同梱しているため、オフラインでも動画生成が可能
 - Service Worker（`sw.js`）がページ・スクリプト・依存ライブラリをキャッシュし、2回目以降のアクセスをオフライン対応にする
 - 外部への送信は行わず、すべてブラウザ内（クライアントサイド）で完結
 
 ## オフライン対応の仕組み
 
-- 初回アクセス時、`sw.js` が `index.html` / `vendor/mp4-muxer.js` / `manifest.webmanifest` などをキャッシュに保存します。
+- 初回アクセス時、`sw.js` が `index.html` / `style.css` / `main.js` / `update.js` / `vendor/mp4-muxer.js` / `manifest.webmanifest` などをキャッシュに保存します。
 - 2回目以降のアクセスでは、ネット接続がなくてもキャッシュから読み込まれ、ページ表示・プレビュー編集・MP4動画生成・再生まで一通り行えます。
 - ページ右上に「オフライン利用可」バッジが表示されたら、Service Workerの準備が完了した合図です。
 - `sw.js` 内のキャッシュはバージョン管理されており（`CACHE_VERSION`）、ファイルを更新した場合はこの値を変更することでキャッシュが更新されます。
+- `update.json` だけはキャッシュ対象から除外され、常にネットワークから最新版を取得しようとします（後述のアップデートシステムのため）。オフライン時はこの取得に失敗しますが、静かに諦める設計になっており、オフライン利用自体は妨げません。
+
+## アップデート通知の仕組み
+
+サイトを更新した際、既にページを開いている（またはPWAとしてホーム画面に追加している）ユーザーに新しいバージョンがあることを知らせ、ワンタップでキャッシュを更新できる仕組みです。
+
+- `index.html` 内で `window.APP_VERSION = '1.0.0'` のように、そのページ自身の現在のバージョンを定義しています。
+- `update.json` に最新バージョン番号と更新内容を記載します：
+  ```json
+  {
+    "version": "1.0.1",
+    "notes": [
+      "文字サイズの上限を広げました",
+      "iPadでの生成速度を改善しました"
+    ]
+  }
+  ```
+- ページ読み込み後、`update.js` が `update.json` をネットワークから取得し、`APP_VERSION` と比較します。
+- `update.json` の `version` の方が新しければ、ページ上部に更新バナー（新バージョン番号＋更新内容＋「更新する」ボタン）が表示されます。
+- 「更新する」ボタンを押すと、Service Workerのキャッシュを全削除し、Service Worker自体も再登録した上でページを再読み込みします。これにより、常に最新の `index.html` / `style.css` / `main.js` などが取得されます。
+
+### 新しいバージョンをリリースする手順
+
+1. `index.html` 内の `window.APP_VERSION` の値を新しいバージョン番号に更新する
+2. `update.json` の `version` を同じ番号に、`notes` に今回の変更点を書く
+3. `sw.js` の `CACHE_VERSION` の値も変更する（例: `text-frame-v3` → `text-frame-v4`）。これを忘れると、Service Worker側のキャッシュが正しく更新されないことがあります。
+4. すべてのファイルをGitHub Pagesにpushする
+5. 既にページを開いているユーザーには、次回そのページを表示した際に更新バナーが表示される
 
 ## 動作環境について
 
-- **Chrome / Edge など Chromium系ブラウザ、および iPadOS 16.4以降のSafari**：WebCodecs APIを使って高速にMP4を生成します。時計オプションを使っても実時間は待たずに生成できます（60分のタイマー動画でも数十秒〜数分程度が目安です）。
-- **WebCodecsに対応していない古いSafari/ブラウザ**：`MediaRecorder` による直接MP4録画方式（H.264）に自動的に切り替わります。**この方式は仕組み上、動画の長さぶんだけ実際に待ち時間が発生します**（例: タイマーを60分に設定すると生成にも約60分かかります）。これはブラウザ標準APIの制約によるもので、この方式を使っている場合はその旨を画面に表示します。
-- 生成前に、お使いの端末がどちらの方式を使うか自動判定されます。可能な限りWebCodecs方式（高速）が優先されます。
-- どちらの方式にも対応していない場合は、その旨をエラーメッセージで表示します。
+- 動画生成には **WebCodecs API**（`VideoEncoder` / `VideoFrame`）が必要です。Chrome / Edge など Chromium系ブラウザ、および iPadOS 16.4以降のSafariで動作します。
+- WebCodecsに対応していない環境では、動画生成ができない旨のエラーメッセージが表示されます。
 - オフライン機能には Service Worker のサポートが必要です。ほとんどのモダンブラウザで対応しています。
 - 共有ボタンは `navigator.share` / `navigator.canShare` に対応した環境（主にスマートフォンのブラウザ）でのみ共有シートが表示されます。非対応環境では代わりにダウンロードをご利用ください。
-- WebCodecs方式でも数千フレーム規模（数十分の動画）になると、エンコード処理自体に一定の時間がかかります。生成中は進捗バーで状況を確認できます。
+- 数千フレーム規模（数十分の動画）になると、エンコード処理自体に一定の時間がかかります。生成中は進捗バーで状況を確認できます。
 
 ## リポジトリ構成
 
 ```
 text-to-video/
-├── index.html              # メインページ（UI・描画・エンコード処理）
-├── sw.js                   # Service Worker（オフラインキャッシュ）
-├── manifest.webmanifest    # PWAマニフェスト
+├── index.html              # メインページ（HTML構造のみ）
+├── style.css                # スタイル
+├── main.js                  # UI操作・描画・動画エンコード処理
+├── update.js                 # アップデート通知システム
+├── update.json               # 最新バージョン番号・更新内容
+├── sw.js                    # Service Worker（オフラインキャッシュ）
+├── manifest.webmanifest     # PWAマニフェスト
 ├── vendor/
-│   └── mp4-muxer.js        # mp4-muxerライブラリ（同梱・CDN不要）
+│   └── mp4-muxer.js         # mp4-muxerライブラリ（同梱・CDN不要）
 └── README.md
 ```
 
 ## GitHub Pages での公開手順
 
-1. このリポジトリの `index.html` / `sw.js` / `manifest.webmanifest` / `vendor/` フォルダをリポジトリのルートに配置する（フォルダ構成を保つこと）
+1. このリポジトリの `index.html` / `style.css` / `main.js` / `update.js` / `update.json` / `sw.js` / `manifest.webmanifest` / `vendor/` フォルダをリポジトリのルートに配置する（フォルダ構成を保つこと）
 2. GitHub の Settings → Pages を開く
 3. Source を `Deploy from a branch` にし、ブランチを `main`（または該当ブランチ）、フォルダを `/ (root)` に設定する
 4. 数分待つと、公開URLが表示される
