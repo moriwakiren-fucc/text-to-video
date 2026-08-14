@@ -1,5 +1,4 @@
 "use strict";
-
 var Mp4Muxer = (() => {
   var __defProp = Object.defineProperty;
   var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
