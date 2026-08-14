@@ -20,6 +20,7 @@
   const postActions = document.getElementById('postActions');
   const downloadBtn = document.getElementById('downloadBtn');
   const shareBtn = document.getElementById('shareBtn');
+  const pipBtn = document.getElementById('pipBtn');
   const dimsTag = document.getElementById('dimsTag');
   const dimsNote = document.getElementById('dimsNote');
 
@@ -471,6 +472,14 @@
     progressBar.classList.remove('visible');
     progressFill.style.width = '0%';
 
+    // 新しい動画を作り直す際、PiPが開いていたら一旦閉じておく
+    if(isCurrentlyInPip()){
+      try {
+        if(document.exitPictureInPicture) await document.exitPictureInPicture();
+        else if(typeof resultVideo.webkitSetPresentationMode === 'function') resultVideo.webkitSetPresentationMode('inline');
+      } catch(e){ /* ignore */ }
+    }
+
     try {
       let mp4Blob;
 
@@ -502,6 +511,7 @@
       resultVideo.src = lastUrl;
       resultVideo.style.display = 'block';
       postActions.style.display = 'flex';
+      refreshPipButtonVisibility();
       statusText.textContent = `完了（${(mp4Blob.size/1024).toFixed(1)} KB, video/mp4）`;
     } catch(err){
       console.error(err);
@@ -512,6 +522,72 @@
       progressBar.classList.remove('visible');
       draw(); // restore preview to default state
     }
+  }
+
+  // ---------- Picture-in-Picture ----------
+  // iPadOS/Safari has historically only supported PiP via the legacy
+  // webkit-prefixed presentation-mode API on <video>, while Chromium/most
+  // modern browsers use the standard requestPictureInPicture(). We detect
+  // and support both so the button works consistently across devices.
+  function isPipSupported(){
+    const standard = typeof resultVideo.requestPictureInPicture === 'function'
+      && document.pictureInPictureEnabled !== false;
+    const webkitLegacy = typeof resultVideo.webkitSupportsPresentationMode === 'function'
+      && typeof resultVideo.webkitSetPresentationMode === 'function';
+    return standard || webkitLegacy;
+  }
+
+  function isCurrentlyInPip(){
+    if(document.pictureInPictureElement === resultVideo) return true;
+    if(resultVideo.webkitPresentationMode === 'picture-in-picture') return true;
+    return false;
+  }
+
+  async function togglePip(){
+    try {
+      if(isCurrentlyInPip()){
+        if(document.exitPictureInPicture && document.pictureInPictureElement === resultVideo){
+          await document.exitPictureInPicture();
+        } else if(typeof resultVideo.webkitSetPresentationMode === 'function'){
+          resultVideo.webkitSetPresentationMode('inline');
+        }
+        return;
+      }
+
+      if(typeof resultVideo.requestPictureInPicture === 'function'){
+        await resultVideo.requestPictureInPicture();
+      } else if(typeof resultVideo.webkitSetPresentationMode === 'function'){
+        // iPadOS/Safari legacy path
+        resultVideo.webkitSetPresentationMode('picture-in-picture');
+      } else {
+        statusText.textContent = 'この端末/ブラウザはピクチャー・イン・ピクチャーに対応していません。';
+        return;
+      }
+    } catch(err){
+      console.error(err);
+      statusText.textContent = 'ピクチャー・イン・ピクチャーの開始に失敗しました: ' + (err && err.message ? err.message : String(err));
+      statusText.classList.add('err');
+    }
+  }
+
+  pipBtn.addEventListener('click', togglePip);
+
+  // Keep the button label in sync with actual PiP state (in case the user
+  // exits PiP via the OS-level control rather than our button).
+  resultVideo.addEventListener('enterpictureinpicture', () => {
+    pipBtn.textContent = 'ピクチャー・イン・ピクチャーを終了';
+  });
+  resultVideo.addEventListener('leavepictureinpicture', () => {
+    pipBtn.textContent = 'ピクチャー・イン・ピクチャー';
+  });
+  resultVideo.addEventListener('webkitpresentationmodechanged', () => {
+    pipBtn.textContent = isCurrentlyInPip()
+      ? 'ピクチャー・イン・ピクチャーを終了'
+      : 'ピクチャー・イン・ピクチャー';
+  });
+
+  function refreshPipButtonVisibility(){
+    pipBtn.style.display = isPipSupported() ? '' : 'none';
   }
 
   generateBtn.addEventListener('click', generateVideo);

@@ -111,11 +111,12 @@
     <div class="status" id="statusText"></div>
     <div class="progress-bar" id="progressBar"><div class="fill" id="progressFill"></div></div>
 
-    <video id="resultVideo" controls playsinline style="display:none;"></video>
+    <video id="resultVideo" controls playsinline webkit-playsinline style="display:none;"></video>
 
     <div class="actions" id="postActions" style="display:none;">
       <button id="downloadBtn" class="secondary">ダウンロード</button>
       <button id="shareBtn" class="secondary">共有</button>
+      <button id="pipBtn" class="secondary" style="display:none;">ピクチャー・イン・ピクチャー</button>
     </div>
   </section>
 
@@ -130,7 +131,7 @@
 <script>
   // このページの現在のバージョン。update.json の "version" と比較されます。
   // リリースごとにここと update.json の両方を更新してください。
-  window.APP_VERSION = '1.1.0';
+  window.APP_VERSION = '1.2.0';
   document.addEventListener('DOMContentLoaded', () => {
     const el = document.getElementById('versionFooter');
     if(el) el.textContent = window.APP_VERSION;
