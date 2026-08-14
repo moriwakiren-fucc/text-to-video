@@ -6,7 +6,7 @@
 // 取得する必要があるため、キャッシュ対象から除外し、fetchハンドラでも
 // network-first（かつキャッシュへの保存もしない）で扱います。
 
-const CACHE_VERSION = 'text-frame-v3';
+const CACHE_VERSION = 'text-frame-v4';
 const PRECACHE_URLS = [
   './',
   './index.html',
