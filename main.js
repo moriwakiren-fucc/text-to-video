@@ -149,6 +149,7 @@
     saveSettings();
   });
   textInput.addEventListener('input', () => {
+    updateCanvasSize();
     draw();
     saveSettings();
   });
@@ -171,19 +172,29 @@
     saveSettings();
   });
 
+  // テキストが空欄で時計がオンの場合は、テキスト欄を確保する必要がないため
+  // 720×240のまま時計のみを中央に大きく表示する動画にする。
+  function isClockOnlyMode(){
+    return clockMode !== 'off' && textInput.value.trim() === '';
+  }
+
   function updateCanvasSize(){
     // 368 is the nearest multiple of 16 at/above 360, which keeps the
     // canvas height H.264-encoder-friendly (VideoToolbox on iPadOS/Safari
     // rejects heights that aren't multiples of 16 for some AVC levels).
-    const newH = clockMode !== 'off' ? 368 : 240;
+    const newH = (clockMode !== 'off' && !isClockOnlyMode()) ? 368 : 240;
     if(newH !== H) resolvedAvcCodec = null; // size changed, re-probe codec support
     H = newH;
     canvas.height = H;
     canvas.style.aspectRatio = `${W}/${H}`;
     dimsTag.textContent = `720×${H} / 1fps`;
-    dimsNote.textContent = clockMode !== 'off'
-      ? '時計はテキストの下に表示されます（720×368）'
-      : '画像はそのまま動画のフレームになります';
+    if(isClockOnlyMode()){
+      dimsNote.textContent = 'テキストが空欄のため、時計のみを中央に表示します（720×240）';
+    } else if(clockMode !== 'off'){
+      dimsNote.textContent = '時計はテキストの下に表示されます（720×368）';
+    } else {
+      dimsNote.textContent = '画像はそのまま動画のフレームになります';
+    }
   }
 
   // ---------- Text wrapping ----------
@@ -238,9 +249,29 @@
 
     const padX = 24;
     const maxWidth = W - padX*2;
+    const clockOn = clockMode !== 'off';
+    const clockOnly = isClockOnlyMode();
+
+    function clockSeconds(){
+      const duration = getDurationSeconds();
+      if(elapsedSeconds === undefined){
+        // preview default: stopwatch shows 0:00, timer shows full duration
+        return clockMode === 'timer' ? duration : 0;
+      }
+      return clockMode === 'timer' ? Math.max(0, duration - elapsedSeconds) : elapsedSeconds;
+    }
+
+    if(clockOnly){
+      // テキストが空欄なので、720×240のキャンバス全体を使って時計だけを中央に大きく表示する。
+      const label = formatClock(clockSeconds());
+      const clockFontSize = Math.max(28, Math.min(120, Math.floor(H * 0.5)));
+      ctx.font = `700 ${clockFontSize}px "JetBrains Mono","SFMono-Regular",Consolas,monospace`;
+      ctx.textAlign = 'center';
+      ctx.fillText(label, W/2, H/2);
+      return;
+    }
 
     // Reserve space for clock area if enabled
-    const clockOn = clockMode !== 'off';
     const clockAreaHeight = clockOn ? 90 : 0;
     const textAreaHeight = H - clockAreaHeight;
 
@@ -270,15 +301,7 @@
 
     // Clock area
     if(clockOn){
-      const duration = getDurationSeconds();
-      let seconds;
-      if(elapsedSeconds === undefined){
-        // preview default: stopwatch shows 0:00, timer shows full duration
-        seconds = clockMode === 'timer' ? duration : 0;
-      } else {
-        seconds = clockMode === 'timer' ? Math.max(0, duration - elapsedSeconds) : elapsedSeconds;
-      }
-      const label = formatClock(seconds);
+      const label = formatClock(clockSeconds());
       const clockFontSize = Math.max(28, Math.min(56, Math.floor(clockAreaHeight * 0.55)));
       ctx.font = `700 ${clockFontSize}px "JetBrains Mono","SFMono-Regular",Consolas,monospace`;
       ctx.textAlign = textAlign === 'left' ? 'left' : 'center';
