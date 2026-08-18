@@ -178,11 +178,18 @@
     return clockMode !== 'off' && textInput.value.trim() === '';
   }
 
+  // テキストと時計の両方がある場合も、高さは720×240のまま、
+  // 左480pxをテキスト・右240pxを時計の横並びレイアウトにする。
+  function isTextAndClockMode(){
+    return clockMode !== 'off' && textInput.value.trim() !== '';
+  }
+
   function updateCanvasSize(){
-    // 368 is the nearest multiple of 16 at/above 360, which keeps the
-    // canvas height H.264-encoder-friendly (VideoToolbox on iPadOS/Safari
-    // rejects heights that aren't multiples of 16 for some AVC levels).
-    const newH = (clockMode !== 'off' && !isClockOnlyMode()) ? 368 : 240;
+    // 常に 720×240 に統一する。
+    // - テキストのみ: 全体にテキスト
+    // - 時計のみ（テキスト空欄）: 中央に時計を大きく表示
+    // - テキスト＋時計: 左480pxにテキスト、右240pxに時計（縦横中央）
+    const newH = 240;
     if(newH !== H) resolvedAvcCodec = null; // size changed, re-probe codec support
     H = newH;
     canvas.height = H;
@@ -190,8 +197,8 @@
     dimsTag.textContent = `720×${H} / 1fps`;
     if(isClockOnlyMode()){
       dimsNote.textContent = 'テキストが空欄のため、時計のみを中央に表示します（720×240）';
-    } else if(clockMode !== 'off'){
-      dimsNote.textContent = '時計はテキストの下に表示されます（720×368）';
+    } else if(isTextAndClockMode()){
+      dimsNote.textContent = '左480pxにテキスト、右240pxに時計を表示します（720×240）';
     } else {
       dimsNote.textContent = '画像はそのまま動画のフレームになります';
     }
@@ -233,6 +240,20 @@
     return Math.round(mins * 60);
   }
 
+  // 指定した幅・高さの矩形に収まるよう、時計ラベルのフォントサイズを自動調整する。
+  // 分が3桁になっても（例: "123:45"）文字が切れないようにするための共通処理。
+  function fitClockFontSize(label, maxWidth, maxFontSize, minFontSize){
+    let size = maxFontSize;
+    ctx.font = `700 ${size}px "JetBrains Mono","SFMono-Regular",Consolas,monospace`;
+    let guard = 0;
+    while(ctx.measureText(label).width > maxWidth && size > minFontSize && guard < 60){
+      size -= 2;
+      ctx.font = `700 ${size}px "JetBrains Mono","SFMono-Regular",Consolas,monospace`;
+      guard++;
+    }
+    return size;
+  }
+
   // elapsedSeconds: for stopwatch, seconds counted up from 0. For timer, seconds counted down from duration.
   function draw(elapsedSeconds){
     const bg = bgColor.value;
@@ -248,9 +269,8 @@
     ctx.textBaseline = 'middle';
 
     const padX = 24;
-    const maxWidth = W - padX*2;
-    const clockOn = clockMode !== 'off';
     const clockOnly = isClockOnlyMode();
+    const textAndClock = isTextAndClockMode();
 
     function clockSeconds(){
       const duration = getDurationSeconds();
@@ -264,24 +284,66 @@
     if(clockOnly){
       // テキストが空欄なので、720×240のキャンバス全体を使って時計だけを中央に大きく表示する。
       const label = formatClock(clockSeconds());
-      const clockFontSize = Math.max(28, Math.min(120, Math.floor(H * 0.5)));
+      const maxClockWidth = W - padX*2;
+      const clockFontSize = fitClockFontSize(label, maxClockWidth, Math.floor(H * 0.5), 20);
       ctx.font = `700 ${clockFontSize}px "JetBrains Mono","SFMono-Regular",Consolas,monospace`;
       ctx.textAlign = 'center';
       ctx.fillText(label, W/2, H/2);
       return;
     }
 
-    // Reserve space for clock area if enabled
-    const clockAreaHeight = clockOn ? 90 : 0;
-    const textAreaHeight = H - clockAreaHeight;
+    if(textAndClock){
+      // テキスト＋時計の両方がある場合：720×240のまま、
+      // 左480pxをテキストエリア、右240pxを時計エリア（縦横中央）とする横並びレイアウト。
+      const textAreaWidth = 480;
+      const clockAreaWidth = W - textAreaWidth; // 240
+      const maxWidth = textAreaWidth - padX*2;
 
+      const lines = wrapText(text, maxWidth, size);
+      const lineHeight = size * 1.2;
+      let effSize = size;
+      let effLines = lines;
+      let effLineHeight = lineHeight;
+      let effTotalHeight = lineHeight * lines.length;
+      const maxHeight = H - 24;
+      let guard = 0;
+      while(effTotalHeight > maxHeight && effSize > 6 && guard < 40){
+        effSize -= 2;
+        effLines = wrapText(text, maxWidth, effSize);
+        effLineHeight = effSize * 1.2;
+        effTotalHeight = effLineHeight * effLines.length;
+        guard++;
+      }
+
+      ctx.font = `700 ${effSize}px "Hiragino Sans","Noto Sans JP",sans-serif`;
+      ctx.textAlign = textAlign === 'left' ? 'left' : 'center';
+      const drawX = textAlign === 'left' ? padX : textAreaWidth/2;
+      const startY = H/2 - effTotalHeight/2 + effLineHeight/2;
+      effLines.forEach((line, i) => {
+        ctx.fillText(line, drawX, startY + i*effLineHeight);
+      });
+
+      // 時計エリア（右240px、縦横中央）。分が3桁になっても切れないよう幅に合わせて自動縮小する。
+      const label = formatClock(clockSeconds());
+      const clockPadX = 12;
+      const maxClockWidth = clockAreaWidth - clockPadX*2;
+      const clockFontSize = fitClockFontSize(label, maxClockWidth, 56, 16);
+      ctx.font = `700 ${clockFontSize}px "JetBrains Mono","SFMono-Regular",Consolas,monospace`;
+      ctx.textAlign = 'center';
+      const clockCenterX = textAreaWidth + clockAreaWidth/2;
+      ctx.fillText(label, clockCenterX, H/2);
+      return;
+    }
+
+    // テキストのみ（時計オフ）：720×240全体をテキストエリアとして使う。
+    const maxWidth = W - padX*2;
     const lines = wrapText(text, maxWidth, size);
     const lineHeight = size * 1.2;
     let effSize = size;
     let effLines = lines;
     let effLineHeight = lineHeight;
     let effTotalHeight = lineHeight * lines.length;
-    const maxHeight = textAreaHeight - 24;
+    const maxHeight = H - 24;
     let guard = 0;
     while(effTotalHeight > maxHeight && effSize > 6 && guard < 40){
       effSize -= 2;
@@ -294,20 +356,10 @@
     ctx.font = `700 ${effSize}px "Hiragino Sans","Noto Sans JP",sans-serif`;
     ctx.textAlign = textAlign === 'left' ? 'left' : 'center';
     const drawX = textAlign === 'left' ? padX : W/2;
-    const startY = textAreaHeight/2 - effTotalHeight/2 + effLineHeight/2;
+    const startY = H/2 - effTotalHeight/2 + effLineHeight/2;
     effLines.forEach((line, i) => {
       ctx.fillText(line, drawX, startY + i*effLineHeight);
     });
-
-    // Clock area
-    if(clockOn){
-      const label = formatClock(clockSeconds());
-      const clockFontSize = Math.max(28, Math.min(56, Math.floor(clockAreaHeight * 0.55)));
-      ctx.font = `700 ${clockFontSize}px "JetBrains Mono","SFMono-Regular",Consolas,monospace`;
-      ctx.textAlign = textAlign === 'left' ? 'left' : 'center';
-      const clockY = textAreaHeight + clockAreaHeight/2;
-      ctx.fillText(label, drawX, clockY);
-    }
   }
 
   // 保存された前回の入力内容・設定があれば復元してから初期描画する
