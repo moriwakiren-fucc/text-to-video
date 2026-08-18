@@ -25,7 +25,7 @@
   const dimsNote = document.getElementById('dimsNote');
 
   const W = 720;
-  let H = 240; // becomes 368 when clock is enabled
+  let H = 240; // 常に720×240。時計・テキストの有無に関わらず高さは変わらない
   let textAlign = 'left'; // 'left' | 'center'
   let clockMode = 'off';  // 'off' | 'stopwatch' | 'timer'
   let resolvedAvcCodec = null; // cached working AVC level string, reset on canvas size change
@@ -387,8 +387,8 @@
   refreshEngineBadge();
 
   // ---------- Encoding (WebCodecs + mp4-muxer) ----------
-  // NOTE: support must be re-checked against the *current* W/H, since the
-  // clock option changes canvas size (240 <-> 368) after the initial check.
+  // NOTE: support must be re-checked whenever canvas size changes (kept as a
+  // guard for future layout changes, even though H is currently fixed at 240).
   const AVC_LEVEL_CANDIDATES = ['1f', '28', '29', '2a']; // 3.1, 4.0, 4.1, 4.2
   async function findWorkingAvcCodec(){
     if(resolvedAvcCodec) return resolvedAvcCodec;
@@ -733,7 +733,12 @@
   const offlineBadge = document.getElementById('offlineBadge');
   if('serviceWorker' in navigator){
     window.addEventListener('load', () => {
-      navigator.serviceWorker.register('sw.js').then((reg) => {
+      // updateViaCache: 'none' を指定しないと、ブラウザのHTTPキャッシュに
+      // 古い sw.js 自体が残ってしまい、新しいコードに更新されないことがある
+      // （= 「アップデートを押しても反映されない」不具合の主因）。
+      // これにより sw.js（および import されるスクリプト）は常にネットワークから
+      // 再検証・取得されるようになる。
+      navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then((reg) => {
         const markReady = () => offlineBadge.classList.add('ready');
         if(reg.active) markReady();
         reg.addEventListener('updatefound', () => {
@@ -742,6 +747,10 @@
             if(sw.state === 'activated') markReady();
           });
         });
+        // ページを開くたびに、新しい sw.js があるかどうかを能動的に確認する。
+        // これにより「開き直しても古いSWのままアップデート通知だけが繰り返し出る」
+        // ケースを防ぐ。
+        reg.update().catch(() => { /* オフライン時などは無視 */ });
       }).catch((err) => {
         console.warn('Service worker registration failed:', err);
       });

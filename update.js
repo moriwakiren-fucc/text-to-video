@@ -70,6 +70,34 @@
       if('serviceWorker' in navigator){
         const regs = await navigator.serviceWorker.getRegistrations();
         await Promise.all(regs.map(reg => reg.unregister().catch(() => {})));
+
+        // 登録解除しただけだとページ遷移直後にまだ新しいSWが有効化されて
+        // おらず、古いキャッシュ挙動を引きずる（あるいは何も制御していない）
+        // 状態でリロードされてしまうことがある。特にiPadOSのホーム画面PWA
+        // （standalone表示）でこの傾向が強い。
+        // そこでここで明示的に新しい sw.js を再登録し、activate されるまで
+        // 待ってからページを再読み込みすることで、リロード後のページが
+        // 確実に最新のService Workerに制御された状態で始まるようにする。
+        try {
+          const reg = await navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' });
+          const sw = reg.installing || reg.waiting;
+          if(sw && sw.state !== 'activated'){
+            await new Promise((resolve) => {
+              const onChange = () => {
+                if(sw.state === 'activated'){
+                  sw.removeEventListener('statechange', onChange);
+                  resolve();
+                }
+              };
+              sw.addEventListener('statechange', onChange);
+              // 念のためのタイムアウト（activateイベントが取れない場合でも
+              // 更新処理自体は止めない）
+              setTimeout(resolve, 3000);
+            });
+          }
+        } catch(swErr){
+          console.warn('[TextFrame update] 新しいService Workerの再登録に失敗しました:', swErr);
+        }
       }
     } catch(e){
       console.warn('[TextFrame update] キャッシュ削除中にエラー:', e);

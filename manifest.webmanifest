@@ -1,7 +1,7 @@
 {
   "name": "Text Frame",
   "short_name": "TextFrame",
-  "description": "テキストを720×240（またはタイマー付き720×368）のMP4動画に変換するツール",
+  "description": "テキストを720×240のMP4動画に変換するツール（タイマー／ストップウォッチ表示にも対応）",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
